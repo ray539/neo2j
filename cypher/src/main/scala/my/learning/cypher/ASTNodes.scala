@@ -1,23 +1,32 @@
 package my.learning.cypher
 
 import scala.compiletime.ops.boolean
+import scala.quoted.Expr
 
 // AST: simplified parse tree
 // - a lot of it is just a copy of the parse tree really
 sealed trait ASTNode;
+
+trait HasLabelAndProperties {
+  def label: Option[String]
+  def properties: Map[String, Expression]
+}
+
 case class RelationshipPattern(
     bindVariable: Variable,
-    relationshipType: Option[String],
-    properties: Map[String, DVal],
+    label: Option[String],
+    properties: Map[String, Expression],
     leftArrow: Boolean,
     rightArrow: Boolean
-) extends ASTNode
+) extends ASTNode, HasLabelAndProperties
 
 case class NodePattern(
     bindVariable: Variable,
     label: Option[String],
-    properties: Map[String, DVal]
-) extends ASTNode
+    properties: Map[String, Expression]
+) extends ASTNode, HasLabelAndProperties
+
+
 
 // node, relationship, node, relationship ...
 // (noe, relationship)* node
@@ -35,24 +44,15 @@ case class MatchClause(pattern: Pattern) extends Clause
 case class DeleteClause(variables: List[Variable]) extends Clause
 case class WhereClause(expr: Expression) extends Clause
 
-sealed trait DVal
-case class DInt(value: Int)
-case class DStr(value: String)
-case class DBool(value: Boolean)
-
-case class Relationship(label: String, start: GraphNode, end: GraphNode, properties: Map[String, DVal]) extends DVal {}
-
-case class GraphNode(id: String, label: String, properties: Map[String, DVal]) extends DVal {
-  var outgoing: List[Relationship] = List()
-  var incoming: List[Relationship] = List() 
-}
-
-case class Path(relationships: List[Relationship]) extends DVal {}
+// sealed trait DVal
+// case class DInt(value: Int)
+// case class DStr(value: String)
+// case class DBool(value: Boolean)
 
 // expressions
 //  (1 + 2) / 3 + a + TRUE / FALSE
 // - just make it a tree
-sealed trait Expression extends ASTNode with DVal
+sealed trait Expression extends ASTNode
 
 sealed trait Operator
 
@@ -88,31 +88,45 @@ case object Relationship_t extends DType
 case object Path_t extends DType
 case object Any_t extends DType
 
-
-
-
 case class BinaryExpression(
     left: Expression,
     operator: Operator,
     right: Expression
-) extends Expression {
-}
+) extends Expression {}
 
 // case object Not extends UnaryOperator
 // case object Plus extends UnaryOperator
 // case object Neg extends UnaryOperator
 case class UnaryExpression(operator: Operator, operand: Expression)
-    extends Expression {
+    extends Expression {}
+
+case class Variable(name: String) extends Expression {}
+
+trait LiteralExpression extends Expression;
+
+case class IntLiteral(value: Int) extends LiteralExpression {}
+
+case class StringLiteral(value: String) extends LiteralExpression {}
+
+case class BoolLiteral(value: Boolean) extends LiteralExpression {}
+
+case class MapLiteral(value: Map[String, Expression])
+    extends LiteralExpression {}
+
+case class Relationship(
+    label: StringLiteral,
+    start: GraphNode,
+    end: GraphNode,
+    properties: MapLiteral
+) extends LiteralExpression {}
+
+case class GraphNode(
+    id: StringLiteral,
+    label: StringLiteral,
+    properties: MapLiteral
+) extends LiteralExpression {
+  var outgoing: List[Relationship] = List()
+  var incoming: List[Relationship] = List()
 }
 
-case class IntLiteral(value: Int) extends Expression {
-}
-
-case class StringLiteral(value: String) extends Expression {
-}
-
-case class BoolLiteral(value: Boolean) extends Expression {
-}
-
-case class Variable(name: String) extends Expression {
-}
+case class Path(relationships: List[Relationship]) extends LiteralExpression {}

@@ -2,3 +2,5 @@ target
 .vscode
 .metals
 .bloop
+.bsp
+.scala-build

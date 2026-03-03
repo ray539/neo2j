@@ -72,6 +72,9 @@ import scala.collection.mutable
 // (this is the 'mixin' pattern)
 trait StatementBuilder extends CypherBaseVisitor[AnyRef] {
 
+
+  def genVarname() = "TODO"
+
   override def visitStatement(ctx: StatementContext): AnyRef = 
     return (for clauseCtx <- ctx.clause.asScala yield visitClause(clauseCtx)).toList
 
@@ -104,12 +107,10 @@ trait StatementBuilder extends CypherBaseVisitor[AnyRef] {
     return (for p <- ctx.pattern().asScala yield visitPattern(p)).toList
 
   // fill in bind variable
+  // - if nothing, we have to fill in something because
   override def visitPattern(ctx: PatternContext): Pattern =
-    val p = visitPatternElement(ctx.patternElement())
-    if ctx.variable() != null then
-      val variable = visitVariable(ctx.variable())
-      return p.copy(bindVariable = Some(variable))
-    return p
+    val vname = if ctx.variable() != null then visitVariable(ctx.variable()) else Variable(genVarname())
+    return visitPatternElement(ctx.patternElement()).copy(bindVariable = vname)
 
   // no bind variable
   override def visitPatternElement(ctx: PatternElementContext): Pattern =
@@ -122,12 +123,12 @@ trait StatementBuilder extends CypherBaseVisitor[AnyRef] {
       visitRelationshipPattern(relationships.get(idx - 1)),
       visitNodePattern(nodes.get(idx))
     )).toList
-    return Pattern(None, firstNode, segments)
+    return Pattern(Variable("none"), firstNode, segments)
 
   override def visitNodePattern(ctx: NodePatternContext): NodePattern =
     val variable =
-      if ctx.variable() != null then Some(visitVariable(ctx.variable()))
-      else None
+      if ctx.variable() != null then visitVariable(ctx.variable())
+      else Variable(genVarname())
     val label =
       if ctx.labelExpression() != null then
         Some(visitLabelExpression(ctx.labelExpression()))
@@ -142,8 +143,8 @@ trait StatementBuilder extends CypherBaseVisitor[AnyRef] {
   ): RelationshipPattern =
     val pointLeft = ctx.LT() != null
     val vname =
-      if ctx.variable() != null then Some(visitVariable(ctx.variable()))
-      else None
+      if ctx.variable() != null then visitVariable(ctx.variable())
+      else Variable(genVarname())
     val label =
       if ctx.labelExpression != null then
         Some(visitLabelExpression(ctx.labelExpression()))

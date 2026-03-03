@@ -2,10 +2,6 @@ package my.learning.cypher
 
 
 case class TypeError(msg: String)
-
-
-
-
 // given something like
 //         +
 //       +   2
@@ -13,9 +9,7 @@ case class TypeError(msg: String)
 // will crush it to be '4'
 // but, if any tree has a 'variable', then it will just fail immediately
 // - I
-class ASTShinker(vars: Map[String, DType]) {}
 
-// 
 class ASTTypeChecker(vartype: Map[String, DType]) {
   // MATCH (n: )
   // focus: check whether the types are correct
@@ -41,8 +35,8 @@ class ASTTypeChecker(vartype: Map[String, DType]) {
     val op = unaryExpression.operator
     (op, optype) match
       case (Add | Sub, Int_t) => Left(Int_t)
-    
-
+      case (Not, Bool_t) => Left(Bool_t)
+      case _ => Right(TypeError("type error"))
   }
 
   // ok, need to get the type of each variable and stuff

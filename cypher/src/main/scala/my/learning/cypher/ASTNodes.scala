@@ -1,25 +1,28 @@
 package my.learning.cypher
 
+import scala.compiletime.ops.boolean
+
 // AST: simplified parse tree
 // - a lot of it is just a copy of the parse tree really
 sealed trait ASTNode;
 case class RelationshipPattern(
-    bindVariable: Option[Variable],
+    bindVariable: Variable,
     relationshipType: Option[String],
-    properties: Map[String, AnyRef],
+    properties: Map[String, DVal],
     leftArrow: Boolean,
     rightArrow: Boolean
 ) extends ASTNode
+
 case class NodePattern(
-    bindVariable: Option[Variable],
+    bindVariable: Variable,
     label: Option[String],
-    properties: Map[String, AnyRef]
+    properties: Map[String, DVal]
 ) extends ASTNode
 
 // node, relationship, node, relationship ...
 // (noe, relationship)* node
 case class Pattern(
-    bindVariable: Option[Variable],
+    bindVariable: Variable,
     firstNode: NodePattern,
     segments: List[(RelationshipPattern, NodePattern)]
 ) extends ASTNode
@@ -32,10 +35,24 @@ case class MatchClause(pattern: Pattern) extends Clause
 case class DeleteClause(variables: List[Variable]) extends Clause
 case class WhereClause(expr: Expression) extends Clause
 
+sealed trait DVal
+case class DInt(value: Int)
+case class DStr(value: String)
+case class DBool(value: Boolean)
+
+case class Relationship(label: String, start: GraphNode, end: GraphNode, properties: Map[String, DVal]) extends DVal {}
+
+case class GraphNode(id: String, label: String, properties: Map[String, DVal]) extends DVal {
+  var outgoing: List[Relationship] = List()
+  var incoming: List[Relationship] = List() 
+}
+
+case class Path(relationships: List[Relationship]) extends DVal {}
+
 // expressions
 //  (1 + 2) / 3 + a + TRUE / FALSE
 // - just make it a tree
-sealed trait Expression extends ASTNode
+sealed trait Expression extends ASTNode with DVal
 
 sealed trait Operator
 
@@ -70,6 +87,9 @@ case object Node_t extends DType
 case object Relationship_t extends DType
 case object Path_t extends DType
 case object Any_t extends DType
+
+
+
 
 case class BinaryExpression(
     left: Expression,

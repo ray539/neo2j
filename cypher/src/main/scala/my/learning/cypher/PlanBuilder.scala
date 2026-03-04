@@ -1,7 +1,7 @@
 package my.learning.cypher
 import scala.collection.mutable
 import java.util.function.BinaryOperator
-import my.learning.cypher.PredBuilder.getAttr
+import scala.annotation.targetName
 
 case class QueryResult(tableData: Map[String, List[Expression]]) {}
 
@@ -56,8 +56,8 @@ enum RelDir {
 }
 
 case class Expand(
-    node_col_name: String,
-    rel_col_name: String,
+    nodeVname: String,
+    relVname: String,
     dir: RelDir,
     operand: PlanOperator
 ) extends NonLeafPlanOperator {
@@ -88,7 +88,7 @@ case class CreateRelationship(
     startColName: String,
     endColName: String,
     direction: RelDir,
-    colname: String
+    vname: String
 ) extends NonLeafPlanOperator {
   override def execute(
       rows: List[Map[String, Expression]]
@@ -102,7 +102,7 @@ case class CreateRelationship(
 case class CreateNode(
     label: String,
     properties: Map[String, Expression],
-    colname: String
+    vname: String
 ) extends NonLeafPlanOperator {
   override def execute(
       rows: List[Map[String, Expression]]
@@ -113,6 +113,31 @@ case class CreateNode(
     return null
   }
 }
+
+case class DeleteVariable(vname: String, operand: PlanOperator) extends NonLeafPlanOperator {
+  override def execute(
+      rows: List[Map[String, Expression]]
+  ): List[Map[String, Expression]] = {
+    // delete variable named 'vname'
+    // - if it is a node, delete node
+    // - if relationship, delete relationship
+    // - if path,
+
+    return null
+  }
+}
+
+case class Projection(targetVname: String, expr: Expression)
+    extends NonLeafPlanOperator {
+  override def execute(
+      rows: List[Map[String, Expression]]
+  ): List[Map[String, Expression]] = {
+    // for each row in rows
+    //   evaluate expr with variables filled by 'row' and
+    return null
+  }
+}
+
 
 trait BasePlanBuilder {
   var boundVars: mutable.Set[String] = mutable.Set()
@@ -126,23 +151,9 @@ case object PredBuilder {
       properties: Map[String, Expression]
   ): Option[Expression] = {
     val pairs = properties.toList
-    val (p0, v0) = pairs(0)
-    val bes = pairs.map((p, v) => {
-      Some(BinaryExpression(
-        left = getAttr(subject, p).get,
-        operator = Eq,
-        right=v
-      ))
-    })
-    return smartAnd(bes)
-  }
-
-  def getAttr(subject: Expression, attrName: String) = {
-    Some(BinaryExpression(
-      left = subject,
-      operator=GetAttr,
-      right=StringLiteral(attrName)
-    ))
+    return smartAnd(pairs.map((p, v) => {
+      Some(subject.getAttr(p).exprEq(v))
+    }))
   }
 
   def smartAnd(exprs: List[Option[Expression]]): Option[Expression] = {
@@ -152,17 +163,11 @@ case object PredBuilder {
     }
     var res = exprsFiltered(0).get
     for pi <- exprsFiltered.slice(1, exprsFiltered.size) do {
-      res = BinaryExpression(
-        res,
-        And,
-        pi.get
-      )
+      res = res && pi.get
     }
     return Some(res)
   }
-
 }
-
 
 trait MatchClauseBuilder extends BasePlanBuilder {
 
@@ -178,40 +183,42 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       plan = FromRows(List())
       return
     }
-    
+
     val dir = (rp.leftArrow, rp.rightArrow) match
       case (true, false) => RelDir.Backward
       case (false, true) => RelDir.Forward
       case _             => RelDir.Both
 
-      // expand current rows based on stuff adjacent to 'leftNodeName'
+    // expand current rows based on stuff adjacent to 'leftNodeName'
     plan = Expand(
       leftNodeName,
       rname,
       dir,
       plan
     )
+    // filter so that it isn't the same as any other visited relationship
+    // - in the current line
 
     filterBasedOnLabelRelationships(rp, rname)
     visitNodePattern(np)
   }
 
-  
-  def filterBasedOnLabelRelationships(p: HasLabelAndProperties, bindVarName: String) = {
+  def filterBasedOnLabelRelationships(
+      p: HasLabelAndProperties,
+      bindVarName: String
+  ) = {
+
     val pred1 = if p.label.isDefined then {
-      val label = StringLiteral(p.label.get)
-      Some(BinaryExpression(
-        left=PredBuilder.getAttr(Variable(bindVarName), "label").get,
-        operator=Eq,
-        right=label
-      ))
+      Some(Variable(bindVarName).getAttr("label").exprEq(p.label.get))
     } else {
       None
     }
+
     val pred2 = PredBuilder.hasAllProperties(
-        subject=PredBuilder.getAttr(Variable(bindVarName), "properties").get,
-        properties=p.properties
-      )
+      subject = Variable(bindVarName).getAttr("properties"),
+      properties = p.properties
+    )
+
     val pred = PredBuilder.smartAnd(List(pred1, pred2))
     if pred.isDefined then {
       plan = Filter(
@@ -235,12 +242,38 @@ trait MatchClauseBuilder extends BasePlanBuilder {
 
   def visitPattern(p: Pattern) = {
     val colname = p.bindVariable.name
+
+    // (a1) - [r1:R] -> (a2) - [r2:R] -> (a3) - [r3:R] -> (a4)
+    // - so current context needs to include all relationship variables in the current pattern
+    // - this way we can create the Path variable 
+
+
+    // projection:
+    // destColName: String
+    // Expr, for example
+    //   row -> Path(List[row.a, row.b, row.c ...])
+
+
+    // case class Projection(destColName: String, expr: <expr involving variables>)
+    // for row in rows
+    //  - row.destColName = expr.execute(row)
+    val relationshipVnames: mutable.Set[String] = mutable.Set()
     visitNodePattern(p.firstNode)
     var bname = p.firstNode.bindVariable.name
     for (rp, np) <- p.segments do {
       visitSegment(bname, (rp, np))
       bname = np.bindVariable.name
+      relationshipVnames.add(rp.bindVariable.name)
     }
+
+    plan = Projection(
+      targetVname = colname,
+      expr = PathConstructor(
+        ListConstructor(
+          relationshipVnames.toList.map(Variable(_))
+        )
+      )
+    )
   }
 
   def visitMatchClause(matchClause: MatchClause) = {
@@ -268,13 +301,12 @@ trait CreateClauseBuilder extends BasePlanBuilder {
     // create next node pattern first
     visitNodePattern(np)
     plan = CreateRelationship(
-      label =
-        if rp.label.isEmpty then "" else rp.label.get,
+      label = if rp.label.isEmpty then "" else rp.label.get,
       properties = rp.properties,
       startColName = leftNodeName,
       endColName = rightNodeName,
       direction = dir,
-      colname = rname
+      vname = rname
     )
   }
 
@@ -284,23 +316,38 @@ trait CreateClauseBuilder extends BasePlanBuilder {
       assert(np.label.isEmpty && np.properties.isEmpty)
       // do nothing
     } else {
-      plan = CreateNode(
-        label = if np.label.isEmpty then "" else np.label.get,
-        properties = np.properties,
-        colname = colname
+      // create the nodes and also cartesian product with the result (if we return it)
+      plan = CProduct(
+        plan,
+        CreateNode(
+          label = if np.label.isEmpty then "" else np.label.get,
+          properties = np.properties,
+          vname = colname
+        )
       )
     }
-    // create the nodes and also cartesian product with the result (if we return it)
   }
 
   def visitPattern(p: Pattern) = {
     val colname = p.bindVariable.name
     visitNodePattern(p.firstNode)
     var bname = p.firstNode.bindVariable.name
+
+    val relationshipVnames: mutable.Set[String] = mutable.Set()
     for (rp, np) <- p.segments do {
+      relationshipVnames.add(rp.bindVariable.name)
       visitSegment(bname, (rp, np))
       bname = np.bindVariable.name
     }
+
+    plan = Projection(
+      targetVname = colname,
+      expr = PathConstructor(
+        ListConstructor(
+          relationshipVnames.toList.map(Variable(_))
+        )
+      )
+    )
   }
 
   def visitCreateClause(createClause: CreateClause) = {
@@ -312,10 +359,21 @@ trait CreateClauseBuilder extends BasePlanBuilder {
 }
 
 trait WhereClauseBuilder extends BasePlanBuilder {
-
   def visitWhereClause(whereClause: WhereClause) = {
     val expr = whereClause.expr
+    plan = Filter(
+      predicate = expr,
+      plan
+    )
+  }
+}
 
+trait DeleteClauseBuilder extends BasePlanBuilder {
+  def visitDeleteClause(deleteClause: DeleteClause) = {
+    val varnames = deleteClause.variables.map(_.name)
+    for vname <- varnames do {
+      plan = DeleteVariable(vname, plan)
+    }
   }
 }
 

@@ -52,7 +52,96 @@ case class WhereClause(expr: Expression) extends Clause
 // expressions
 //  (1 + 2) / 3 + a + TRUE / FALSE
 // - just make it a tree
-sealed trait Expression extends ASTNode
+sealed trait Expression extends ASTNode {
+
+    def+(that: Expression) = {
+        BinaryExpression(
+            this,
+            Add,
+            that
+        )
+    }
+    
+    def-(that:Expression) = {
+        BinaryExpression(
+            this,
+            Sub,
+            that
+        )
+    }
+
+    def*(that: Expression) = {
+        BinaryExpression(
+            this,
+            Mul,
+            that
+        )
+    }
+    def/(that: Expression) = {
+        BinaryExpression(
+            this,
+            Div,
+            that
+        )
+    }
+
+    def&&(that: Expression) = {
+        BinaryExpression(
+            this,
+            And,
+            that
+        )
+    }
+
+    def||(that: Expression) = {
+        BinaryExpression(
+            this,
+            Or,
+            that
+        )
+    }
+
+    def !() = {
+        UnaryExpression(
+            Sub,
+            this
+        )
+    }
+
+    def getAttr(that: Expression) = {
+        BinaryExpression(
+            this,
+            GetAttr,
+            that
+        )
+    }
+
+    def getAttr(that: String) = {
+        BinaryExpression(
+            this,
+            GetAttr,
+            StringLiteral(that)
+        )
+    }
+
+
+    def exprEq(that: Expression) = {
+        BinaryExpression(
+            this,
+            Eq,
+            that
+        )
+    }
+    def exprEq(that: String) = {
+        BinaryExpression(
+            this,
+            Eq,
+            StringLiteral(that)
+        )
+    }
+    
+}
+
 
 sealed trait Operator
 
@@ -110,8 +199,14 @@ case class StringLiteral(value: String) extends LiteralExpression {}
 
 case class BoolLiteral(value: Boolean) extends LiteralExpression {}
 
-case class MapLiteral(value: Map[String, Expression])
+case class MapLiteral(value: Map[String, LiteralExpression])
     extends LiteralExpression {}
+
+
+// Seq is a trait which covers List, .. and bunch of others
+case class ListLiteral(value: Seq[LiteralExpression]) extends LiteralExpression {}
+// constructor which takes in an arbritary amount of arguments
+case class ListConstructor(values: Seq[Expression]) extends Expression {}
 
 case class Relationship(
     label: StringLiteral,
@@ -124,9 +219,11 @@ case class GraphNode(
     id: StringLiteral,
     label: StringLiteral,
     properties: MapLiteral
-) extends LiteralExpression {
-  var outgoing: List[Relationship] = List()
-  var incoming: List[Relationship] = List()
-}
+) extends LiteralExpression {}
+//   var outgoing: List[Relationship] = List()
+//   var incoming: List[Relationship] = List()}
 
-case class Path(relationships: List[Relationship]) extends LiteralExpression {}
+// should be 'list of relationships'
+case class Path(relationships: ListLiteral) extends LiteralExpression {}
+
+case class PathConstructor(relationships: ListConstructor | ListLiteral) extends Expression {}

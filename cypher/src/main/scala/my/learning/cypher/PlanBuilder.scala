@@ -5,11 +5,14 @@ import scala.annotation.targetName
 
 case class QueryResult(tableData: Map[String, List[Expression]]) {}
 
+
+// these are stuff that yield iterators over ROWS
 trait PlanOperator {}
 
 trait LeafPlanOperator extends PlanOperator {
   def execute(): List[Map[String, Expression]]
 }
+
 trait NonLeafPlanOperator extends PlanOperator {
   def execute(
       rows: List[Map[String, Expression]]
@@ -25,20 +28,18 @@ case class AllNodesScan(vname: String) extends LeafPlanOperator {
   }
 }
 
-case class FromRows(rows: List[Map[String, Expression]])
-    extends LeafPlanOperator {
-  override def execute(): List[Map[String, Expression]] = rows
-}
-
-case class Id(
-    operand: PlanOperator
-) extends NonLeafPlanOperator {
-  override def execute(
-      rows: List[Map[String, Expression]]
-  ): List[Map[String, Expression]] = {
-    return rows
+case class EmptyResult() extends LeafPlanOperator {
+  override def execute(): List[Map[String, Expression]] = {
+    return List()
   }
 }
+
+case class EmptyRow() extends LeafPlanOperator {
+  override def execute(): List[Map[String, Expression]] = {
+    return List(Map())
+  }
+}
+
 
 case class Filter(
     predicate: Expression,
@@ -47,6 +48,10 @@ case class Filter(
   override def execute(
       rows: List[Map[String, Expression]]
   ): List[Map[String, Expression]] = {
+    // for every row:
+    // - apply predicate on the row, replacing 'Variable' objects as appropiate
+    // - if result ends up being 'False' (we have to evaluate the actual thing)
+    //   we just skip the row
     return null
   }
 }
@@ -141,7 +146,7 @@ case class Projection(targetVname: String, expr: Expression)
 
 trait BasePlanBuilder {
   var boundVars: mutable.Set[String] = mutable.Set()
-  var plan: PlanOperator = FromRows(List())
+  var plan: PlanOperator = EmptyRow()
 }
 
 case object PredBuilder {
@@ -180,7 +185,7 @@ trait MatchClauseBuilder extends BasePlanBuilder {
     val rname = rp.bindVariable.name
     // if relationship variable is already bound, entire query returns nothing
     if boundVars.contains(rname) then {
-      plan = FromRows(List())
+      plan = EmptyResult()
       return
     }
 
@@ -229,34 +234,19 @@ trait MatchClauseBuilder extends BasePlanBuilder {
   }
 
   def visitNodePattern(np: NodePattern) = {
-    val colname = np.bindVariable.name
-    if !boundVars.contains(colname) then {
+    val vname = np.bindVariable.name
+    if !boundVars.contains(vname) then {
       plan = CProduct(
         plan,
-        AllNodesScan(colname)
+        AllNodesScan(vname)
       )
-      boundVars.add(colname)
+      boundVars.add(vname)
     }
-    filterBasedOnLabelRelationships(np, colname)
+    filterBasedOnLabelRelationships(np, vname)
   }
 
   def visitPattern(p: Pattern) = {
-    val colname = p.bindVariable.name
-
-    // (a1) - [r1:R] -> (a2) - [r2:R] -> (a3) - [r3:R] -> (a4)
-    // - so current context needs to include all relationship variables in the current pattern
-    // - this way we can create the Path variable 
-
-
-    // projection:
-    // destColName: String
-    // Expr, for example
-    //   row -> Path(List[row.a, row.b, row.c ...])
-
-
-    // case class Projection(destColName: String, expr: <expr involving variables>)
-    // for row in rows
-    //  - row.destColName = expr.execute(row)
+    val vname = p.bindVariable.name
     val relationshipVnames: mutable.Set[String] = mutable.Set()
     visitNodePattern(p.firstNode)
     var bname = p.firstNode.bindVariable.name
@@ -265,9 +255,8 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       bname = np.bindVariable.name
       relationshipVnames.add(rp.bindVariable.name)
     }
-
     plan = Projection(
-      targetVname = colname,
+      targetVname = vname,
       expr = PathConstructor(
         ListConstructor(
           relationshipVnames.toList.map(Variable(_))

@@ -1,7 +1,20 @@
 package my.learning.cypher
 
 
+
 case class TypeError(msg: String)
+sealed trait DType
+
+// can't extend Int_t, because it is a VALUE
+// - a case object is a VALUE
+case object Int_t extends DType
+case object Str_t extends DType
+case object Bool_t extends DType
+
+case object Node_t extends DType
+case object Relationship_t extends DType
+case object Path_t extends DType
+case object Any_t extends DType
 // given something like
 //         +
 //       +   2

@@ -18,15 +18,15 @@ case class RelationshipPattern(
     properties: Map[String, Expression],
     leftArrow: Boolean,
     rightArrow: Boolean
-) extends ASTNode, HasLabelAndProperties
+) extends ASTNode,
+      HasLabelAndProperties
 
 case class NodePattern(
     bindVariable: Variable,
     label: Option[String],
     properties: Map[String, Expression]
-) extends ASTNode, HasLabelAndProperties
-
-
+) extends ASTNode,
+      HasLabelAndProperties
 
 // node, relationship, node, relationship ...
 // (noe, relationship)* node
@@ -54,94 +54,92 @@ case class WhereClause(expr: Expression) extends Clause
 // - just make it a tree
 sealed trait Expression extends ASTNode {
 
-    def+(that: Expression) = {
-        BinaryExpression(
-            this,
-            Add,
-            that
-        )
-    }
-    
-    def-(that:Expression) = {
-        BinaryExpression(
-            this,
-            Sub,
-            that
-        )
-    }
+  def +(that: Expression) = {
+    BinaryExpression(
+      this,
+      Add,
+      that
+    )
+  }
 
-    def*(that: Expression) = {
-        BinaryExpression(
-            this,
-            Mul,
-            that
-        )
-    }
-    def/(that: Expression) = {
-        BinaryExpression(
-            this,
-            Div,
-            that
-        )
-    }
+  def -(that: Expression) = {
+    BinaryExpression(
+      this,
+      Sub,
+      that
+    )
+  }
 
-    def&&(that: Expression) = {
-        BinaryExpression(
-            this,
-            And,
-            that
-        )
-    }
+  def *(that: Expression) = {
+    BinaryExpression(
+      this,
+      Mul,
+      that
+    )
+  }
+  def /(that: Expression) = {
+    BinaryExpression(
+      this,
+      Div,
+      that
+    )
+  }
 
-    def||(that: Expression) = {
-        BinaryExpression(
-            this,
-            Or,
-            that
-        )
-    }
+  def &&(that: Expression) = {
+    BinaryExpression(
+      this,
+      And,
+      that
+    )
+  }
 
-    def !() = {
-        UnaryExpression(
-            Sub,
-            this
-        )
-    }
+  def ||(that: Expression) = {
+    BinaryExpression(
+      this,
+      Or,
+      that
+    )
+  }
 
-    def getAttr(that: Expression) = {
-        BinaryExpression(
-            this,
-            GetAttr,
-            that
-        )
-    }
+  def !() = {
+    UnaryExpression(
+      Sub,
+      this
+    )
+  }
 
-    def getAttr(that: String) = {
-        BinaryExpression(
-            this,
-            GetAttr,
-            StringLiteral(that)
-        )
-    }
+  def getAttr(that: Expression) = {
+    BinaryExpression(
+      this,
+      GetAttr,
+      that
+    )
+  }
 
+  def getAttr(that: String) = {
+    BinaryExpression(
+      this,
+      GetAttr,
+      StringLiteral(that)
+    )
+  }
 
-    def exprEq(that: Expression) = {
-        BinaryExpression(
-            this,
-            Eq,
-            that
-        )
-    }
-    def exprEq(that: String) = {
-        BinaryExpression(
-            this,
-            Eq,
-            StringLiteral(that)
-        )
-    }
-    
+  def exprEq(that: Expression) = {
+    BinaryExpression(
+      this,
+      Eq,
+      that
+    )
+  }
+  def exprEq(that: String) = {
+    BinaryExpression(
+      this,
+      Eq,
+      StringLiteral(that)
+    )
+  }
+
 }
-
 
 sealed trait Operator
 
@@ -163,19 +161,6 @@ case object Not extends Operator
 
 case object GetAttr extends Operator
 case object Index extends Operator
-
-sealed trait DType
-
-// can't extend Int_t, because it is a VALUE
-// - a case object is a VALUE
-case object Int_t extends DType
-case object Str_t extends DType
-case object Bool_t extends DType
-
-case object Node_t extends DType
-case object Relationship_t extends DType
-case object Path_t extends DType
-case object Any_t extends DType
 
 case class BinaryExpression(
     left: Expression,
@@ -202,9 +187,9 @@ case class BoolLiteral(value: Boolean) extends LiteralExpression {}
 case class MapLiteral(value: Map[String, LiteralExpression])
     extends LiteralExpression {}
 
-
 // Seq is a trait which covers List, .. and bunch of others
-case class ListLiteral(value: Seq[LiteralExpression]) extends LiteralExpression {}
+case class ListLiteral(value: Seq[LiteralExpression])
+    extends LiteralExpression {}
 // constructor which takes in an arbritary amount of arguments
 case class ListConstructor(values: Seq[Expression]) extends Expression {}
 
@@ -226,4 +211,5 @@ case class GraphNode(
 // should be 'list of relationships'
 case class Path(relationships: ListLiteral) extends LiteralExpression {}
 
-case class PathConstructor(relationships: ListConstructor | ListLiteral) extends Expression {}
+case class PathConstructor(relationships: Expression)
+    extends Expression {}

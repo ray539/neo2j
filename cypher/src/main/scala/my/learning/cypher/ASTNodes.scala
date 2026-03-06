@@ -57,7 +57,7 @@ case class WhereClause(expr: Expression) extends Clause
 sealed trait Expression extends ASTNode {
 
   def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression
 
   def +(that: Expression): Expression = {
@@ -144,6 +144,28 @@ sealed trait Expression extends ASTNode {
     )
   }
 
+  def getStartNode(): Expression = {
+    UnaryExpression(
+      GetStartNode,
+      this
+    )
+  }
+
+  def getEndNode(): Expression = {
+    UnaryExpression(
+      GetEndNode,
+      this
+    )
+  }
+
+  def idEq(that: Expression): Expression = {
+    BinaryExpression(
+      this,
+      IdEq,
+      that
+    )
+  }
+
   def exprEq(that: Expression): Expression = {
     BinaryExpression(
       this,
@@ -177,11 +199,14 @@ case object Div extends Operator
 case object Mod extends Operator
 case object Pow extends Operator
 case object Not extends Operator
+case object IdEq extends Operator
 
 case object GetAttr extends Operator
 case object Index extends Operator
 case object GetLabel extends Operator
 case object GetProperties extends Operator
+case object GetStartNode extends Operator
+case object GetEndNode extends Operator
 
 case class BinaryExpression(
     left: Expression,
@@ -190,10 +215,10 @@ case class BinaryExpression(
 ) extends Expression {
 
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = {
-    val lval = left.getLiteralValue(varValues)
-    val rval = right.getLiteralValue(varValues)
+    val lval = left.getLiteralValue(varValues, ktx)
+    val rval = right.getLiteralValue(varValues, ktx)
 
     // REFACTORING
     // - make each operator handle the the types instead of a giant pattern match here ...
@@ -220,6 +245,8 @@ case class BinaryExpression(
       // equality
       case (v1, Eq, v2)  => BoolLiteral(v1 == v2)
       case (v1, Neq, v2) => BoolLiteral(v1 != v2)
+      case (v1: NodeRecord, IdEq, v2: NodeRecord) => BoolLiteral(v1.id == v2.id)
+      case (v1: RelationshipRecord, IdEq, v2: RelationshipRecord) => BoolLiteral(v1.id == v2.id)
 
       // boolean logic
       case (BoolLiteral(b1), And, BoolLiteral(b2)) =>
@@ -249,9 +276,9 @@ case class BinaryExpression(
 case class UnaryExpression(operator: Operator, operand: Expression)
     extends Expression {
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = {
-    val cval = operand.getLiteralValue(varValues)
+    val cval = operand.getLiteralValue(varValues, ktx)
 
     (operator, cval) match
       case (Add, IntLiteral(x)) =>
@@ -267,7 +294,8 @@ case class UnaryExpression(operator: Operator, operand: Expression)
       case (GetProperties, NodeRecord(id, label, properties)) => MapLiteral(properties)
       case (GetLabel, RelationshipRecord(id, label, properties, _, _)) => StringLiteral(label)
       case (GetProperties, RelationshipRecord(id, label, properties, _, _)) => MapLiteral(properties)
-
+      case (GetStartNode, RelationshipRecord(id, label, properties, sn, en)) => ktx.readApi.nodeById(sn)
+      case (GetEndNode, RelationshipRecord(id, label, properties, sn, en)) => ktx.readApi.nodeById(en)
       case _ =>
         throw new RuntimeException(
           s"Invalid unary operation: $operator on $cval"
@@ -278,7 +306,7 @@ case class UnaryExpression(operator: Operator, operand: Expression)
 case class Variable(name: String) extends Expression {
 
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = {
     varValues(name)
   }
@@ -291,7 +319,7 @@ trait LiteralExpression extends Expression {
 case class IntLiteral(value: Int) extends LiteralExpression {
   override def isTruthy: Boolean = (value != 0)
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = {
     this
   }
@@ -301,7 +329,7 @@ case class IntLiteral(value: Int) extends LiteralExpression {
 case class NodeId(id: Int) extends LiteralExpression {
   override def isTruthy: Boolean = true
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = this
 }
 
@@ -309,7 +337,7 @@ case class NodeId(id: Int) extends LiteralExpression {
 case class RelId(id: Int) extends LiteralExpression {
   override def isTruthy: Boolean = true
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = this
 }
 
@@ -317,7 +345,7 @@ case class StringLiteral(value: String) extends LiteralExpression {
 
   override def isTruthy: Boolean = value.size != 0
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = {
     this
   }
@@ -330,7 +358,7 @@ case class BoolLiteral(value: Boolean) extends LiteralExpression {
   override def isTruthy: Boolean = value
 
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = {
     this
   }
@@ -342,7 +370,7 @@ case class MapLiteral(value: Map[String, LiteralExpression])
   override def isTruthy: Boolean = value.size > 0
 
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = {
     this
   }
@@ -355,7 +383,7 @@ case class ListLiteral(value: List[LiteralExpression])
   override def isTruthy: Boolean = value.size > 0
 
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = {
     this
   }
@@ -365,9 +393,9 @@ case class ListLiteral(value: List[LiteralExpression])
 case class ListConstructorCall(values: Seq[Expression]) extends Expression {
 
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): ListLiteral = {
-    ListLiteral(values.map(v => v.getLiteralValue(varValues)).toList)
+    ListLiteral(values.map(v => v.getLiteralValue(varValues, ktx)).toList)
   }
 }
 
@@ -380,7 +408,7 @@ case class NodeRecord(
   override def isTruthy: Boolean = true
 
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): NodeRecord = {
     this
   }
@@ -397,7 +425,7 @@ case class RelationshipRecord(
   override def isTruthy: Boolean = true
 
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): RelationshipRecord = {
     this
   }
@@ -413,7 +441,7 @@ case class Path(relationships: ListLiteral) extends LiteralExpression {
   }
 
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): Path = {
     this
   }
@@ -421,9 +449,9 @@ case class Path(relationships: ListLiteral) extends LiteralExpression {
 
 case class PathConstructorCall(relationships: Expression) extends Expression {
   override def getLiteralValue(
-      varValues: Map[String, LiteralExpression]
+      varValues: Map[String, LiteralExpression], ktx: KernelTransaction
   ): LiteralExpression = {
-    relationships.getLiteralValue(varValues) match {
+    relationships.getLiteralValue(varValues, ktx) match {
       case lst: ListLiteral => Path(lst)
       case _                => throw Exception("expected list")
     }

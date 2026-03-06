@@ -56,11 +56,12 @@ case class EmptyRow() extends LeafPlanOperator {
 }
 
 case class Filter(
-    predicate: Expression,
-    operand: PlanOperator
+    predicate: (Map[String, LiteralExpression]) => Boolean,
+    operand: PlanOperator,
+    ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
   override def iterator: Iterator[Map[String, LiteralExpression]] =
-    operand.filter(row => predicate.getLiteralValue(row).isTruthy).iterator
+    operand.filter(row => predicate(row)).iterator
 }
 
 enum RelDir {
@@ -107,13 +108,15 @@ case class Expand(
 
 case class Projection(
     targetVname: String,
-    expr: Expression,
+    expr: (Map[String, LiteralExpression]) => Expression,
     operand: PlanOperator,
     ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
 
   override def iterator: Iterator[Map[String, LiteralExpression]] =
-    operand.map(row => row.concat(Map((targetVname, expr.getLiteralValue(row))))).iterator
+    operand
+      .map(row => row.concat(Map((targetVname, expr(row).getLiteralValue(row, ktx)))))
+      .iterator
 }
 
 case class CreateRelationship(
@@ -127,20 +130,21 @@ case class CreateRelationship(
     ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
 
-
   def _createRelationship(row: Map[String, LiteralExpression]) = {
     val n1 = row(startColName).asInstanceOf[NodeRecord].id
     val n2 = row(endColName).asInstanceOf[NodeRecord].id
 
     val props: Map[String, LiteralExpression] =
-      properties.map((k, v) => (k, v.getLiteralValue(row)))
+      properties.map((k, v) => (k, v.getLiteralValue(row, ktx)))
     ktx.writeApi.relationshipCreate(label, props, n1, n2)
   }
 
-  override def iterator: Iterator[Map[String, LiteralExpression]] = operand.map(row => {
-    _createRelationship(row)
-    row
-  }).iterator
+  override def iterator: Iterator[Map[String, LiteralExpression]] = operand
+    .map(row => {
+      _createRelationship(row)
+      row
+    })
+    .iterator
 }
 
 case class CreateNode(
@@ -150,14 +154,15 @@ case class CreateNode(
     operand: PlanOperator,
     ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
-  
-  // when iterated over a row, it will create the node using that row and return it
-  override def iterator: Iterator[Map[String, LiteralExpression]] = operand.map(row => {
-    val props = properties.map((k, v) => (k, v.getLiteralValue(row)))
-    ktx.writeApi.nodeCreate(label, props)
-    row
-  }).iterator
 
+  // when iterated over a row, it will create the node using that row and return it
+  override def iterator: Iterator[Map[String, LiteralExpression]] = operand
+    .map(row => {
+      val props = properties.map((k, v) => (k, v.getLiteralValue(row, ktx)))
+      ktx.writeApi.nodeCreate(label, props)
+      row
+    })
+    .iterator
 
 }
 
@@ -235,6 +240,8 @@ case object PredBuilder {
   }
 }
 
+def genAnonVarName = "asd";
+
 trait MatchClauseBuilder extends BasePlanBuilder {
 
   val store: StorageEngine = StorageEngine()
@@ -271,8 +278,41 @@ trait MatchClauseBuilder extends BasePlanBuilder {
 
     filterBasedOnLabelRelationships(rp, rname)
 
-    // not quite right... have to fix this later
-    visitNodePattern(np)
+    // get other node in the relationship that isn't equal to the one bound to 'leftNodeName'
+    val getotherNode = (row: Map[String, LiteralExpression]) => {
+      val rel = row(rname).asInstanceOf[RelationshipRecord]
+      val leftNode = row(leftNodeName).asInstanceOf[NodeRecord]
+      if rel.startNode == leftNode.id then {
+        ktx.readApi.nodeById(rel.endNode)
+      } else {
+        assert(rel.endNode == leftNode.id)
+        ktx.readApi.nodeById(rel.startNode)
+      }
+    }
+
+    if boundVars.contains(np.bindVariable.name) then
+      val anonVname = genAnonVarName
+      // project the right
+      plan = Projection(
+        anonVname, 
+        getotherNode,
+        plan,
+        ktx
+      )
+      plan = Filter(
+        (row) => row(anonVname).asInstanceOf[NodeRecord].id == row(leftNodeName).asInstanceOf[NodeRecord].id,
+        plan,
+        ktx
+      )
+    else
+      plan = Projection(
+        np.bindVariable.name,
+        getotherNode,
+        plan,
+        ktx
+      )
+      // do the Cproduct again to populate other field
+      visitNodePattern(np)
   }
 
   def filterBasedOnLabelRelationships(
@@ -301,8 +341,9 @@ trait MatchClauseBuilder extends BasePlanBuilder {
     val pred = PredBuilder.smartAnd(List(pred1, pred2))
     if pred.isDefined then {
       plan = Filter(
-        predicate = pred.get,
-        plan
+        predicate = (row) => pred.get.getLiteralValue(row, ktx).isTruthy,
+        plan,
+        ktx
       )
     }
   }
@@ -320,7 +361,7 @@ trait MatchClauseBuilder extends BasePlanBuilder {
   }
 
   def visitPattern(p: Pattern) = {
-    val vname = p.bindVariable.name
+    val pathVname = p.bindVariable.name
     val relationshipVnames: mutable.Set[String] = mutable.Set()
     visitNodePattern(p.firstNode)
     var bname = p.firstNode.bindVariable.name
@@ -331,8 +372,8 @@ trait MatchClauseBuilder extends BasePlanBuilder {
     }
 
     plan = Projection(
-      targetVname = vname,
-      expr = PathConstructorCall(
+      targetVname = pathVname,
+      expr = (_) => PathConstructorCall(
         ListConstructorCall(
           relationshipVnames.toList.map(Variable(_))
         )
@@ -415,7 +456,7 @@ trait CreateClauseBuilder extends BasePlanBuilder {
 
     plan = Projection(
       targetVname = colname,
-      expr = PathConstructorCall(
+      expr = (_) => PathConstructorCall(
         ListConstructorCall(
           relationshipVnames.toList.map(Variable(_))
         )
@@ -434,11 +475,15 @@ trait CreateClauseBuilder extends BasePlanBuilder {
 }
 
 trait WhereClauseBuilder extends BasePlanBuilder {
+  val store: StorageEngine = StorageEngine()
+  val ktx: KernelTransaction = KernelTransaction(store)
+
   def visitWhereClause(whereClause: WhereClause) = {
     val expr = whereClause.expr
     plan = Filter(
-      predicate = expr,
-      plan
+      predicate = (row) => expr.getLiteralValue(row, ktx).isTruthy,
+      plan,
+      ktx
     )
   }
 }
@@ -480,5 +525,8 @@ def temp() = {
   var it1 = List(1, 2, 3).iterator
   var it2 = List(4, 5, 6).iterator
 
-  val asd = (for x <- it1; y <- it2 yield (x, y)).map((x, y) => x + y)
+  val it3 = (for x <- it1; y <- it2 yield (x, y))
+  print(it3.next())
+  print(it3.next())
+  print(it3.next())
 }

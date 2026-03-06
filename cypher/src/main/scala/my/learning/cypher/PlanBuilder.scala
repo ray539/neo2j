@@ -59,33 +59,8 @@ case class Filter(
     predicate: Expression,
     operand: PlanOperator
 ) extends NonLeafPlanOperator {
-
   override def iterator: Iterator[Map[String, LiteralExpression]] =
-    new Iterator[Map[String, LiteralExpression]] {
-      var _it: Iterator[Map[String, LiteralExpression]] = null
-      var initialized = false
-
-      def _initialize() = {
-        if !initialized then {
-          _it = operand.iterator.dropWhile(row =>
-            !predicate.getLiteralValue(row).isTruthy
-          )
-          initialized = true
-        }
-      }
-
-      override def hasNext(): Boolean = {
-        _initialize()
-        _it.hasNext
-      }
-
-      override def next(): Map[String, LiteralExpression] = {
-        _initialize()
-        val ret = _it.next()
-        _it = _it.dropWhile(row => !predicate.getLiteralValue(row).isTruthy)
-        ret
-      }
-    }
+    operand.filter(row => predicate.getLiteralValue(row).isTruthy).iterator
 }
 
 enum RelDir {
@@ -94,40 +69,12 @@ enum RelDir {
 
 case class CProduct(left: PlanOperator, right: PlanOperator)
     extends NonLeafPlanOperator {
+
   override def iterator: Iterator[Map[String, LiteralExpression]] =
-    new Iterator[Map[String, LiteralExpression]] {
-      var _left = left.iterator
-      var _right = right.iterator
-
-      override def hasNext(): Boolean = {
-        _left.hasNext && _right.hasNext
-      }
-
-      var first = true
-      var row1: Map[String, LiteralExpression] = null;
-      var row2: Map[String, LiteralExpression] = null;
-
-      override def next(): Map[String, LiteralExpression] = {
-        assert(
-          _right.hasNext && _left.hasNext,
-          throw new NoSuchElementException("asd")
-        )
-        if first then {
-          row1 = _left.next()
-          row2 = _right.next()
-          first = false
-          row1.concat(row2)
-        } else {
-          row2 = _right.next()
-          if !_right.hasNext then {
-            _right = right.iterator
-            row2 = _right.next()
-            row1 = _left.next()
-          }
-          row1.concat(row2)
-        }
-      }
-    }
+    (for
+      row1 <- left;
+      row2 <- right
+    yield (row1.concat(row2))).iterator
 }
 
 case class Expand(
@@ -141,94 +88,32 @@ case class Expand(
   //      use dir to look at the relevant outgoing / incoming relationships, and add to row under name 'relVname'
   //      add the record under
   // }
-  override def iterator: Iterator[Map[String, LiteralExpression]] =
-    new Iterator[Map[String, LiteralExpression]] {
-
-      var _rowit: Iterator[Map[String, LiteralExpression]] = null
-      var _rCursor: RelationshipCursor = ktx.getRelationshipCursor()
-      var curRow: Option[Map[String, LiteralExpression]] = None
-
-      var initialized = false
-
-      def _initialize() = {
-        if !initialized then {
-          _rowit = operand.iterator
-          // drop while there are no relationships adjacent to 'rowit'
-          _rowit = _rowit.dropWhile(row => {
-            val nodeRecord = row(nodeVname).asInstanceOf[NodeRecord]
-            ktx.readApi.relsAdjToNodeScan(_rCursor, nodeRecord.id, dir)
-            !_rCursor.hasNext()
-          })
-
-          // get curRow
-          curRow = _rowit.nextOption()
-
-          // set _rCursor
-          if curRow.isDefined then {
-            val nodeRecord = curRow.get(nodeVname).asInstanceOf[NodeRecord]
-            ktx.readApi.relsAdjToNodeScan(_rCursor, nodeRecord.id, dir)
-            assert(_rCursor.hasNext())
-          } else {
-            _rCursor = null
-          }
-
-          initialized = true
-        }
+  override def iterator: Iterator[Map[String, LiteralExpression]] = {
+    def adjRels(nodeId: Int) = new Iterator[RelationshipRecord] {
+      var rCursor: RelationshipCursor = ktx.getRelationshipCursor()
+      ktx.readApi.relsAdjToNodeScan(rCursor, nodeId, dir)
+      override def hasNext: Boolean = rCursor.hasNext()
+      override def next(): RelationshipRecord = {
+        val rId = rCursor.getRelationshipReference()
+        ktx.readApi.relationshipById(rId)
       }
-
-      override def hasNext: Boolean = {
-        _initialize()
-        curRow != null
-      }
-
-      override def next(): Map[String, LiteralExpression] = {
-        assert(curRow != null, throw Exception("no such element"))
-        assert(_rCursor.hasNext(), throw Exception("BUG in Expand"))
-
-        _initialize()
-
-        // get next relationship (at least one)
-        val relId = _rCursor.getRelationshipReference();
-        val rel = ktx.readApi.relationshipById(relId);
-
-        if !_rCursor.hasNext() then {
-          // move _rowit forward until nonempty found
-          _rowit = _rowit.dropWhile(row => {
-            val nodeRecord = row(nodeVname).asInstanceOf[NodeRecord]
-            ktx.readApi.relsAdjToNodeScan(_rCursor, nodeRecord.id, dir)
-            !_rCursor.hasNext()
-          })
-
-          // set _rcursor
-          curRow = _rowit.nextOption()
-          if curRow.isDefined then {
-            val nodeRecord = curRow.get(nodeVname).asInstanceOf[NodeRecord]
-            ktx.readApi.relsAdjToNodeScan(_rCursor, nodeRecord.id, dir)
-            assert(_rCursor.hasNext())
-          } else {
-            _rCursor = null
-          }
-        }
-
-        val res = curRow.get.concat(Map((relVname, rel)))
-        res
-      }
-
     }
+    (for
+      row <- operand;
+      rRecord <- adjRels(row(nodeVname).asInstanceOf[NodeRecord].id)
+    yield row.concat(Map((relVname, rRecord)))).iterator
+  }
 }
 
-case class Projection(targetVname: String, expr: Expression, operand: PlanOperator, ktx: KernelTransaction)
-    extends NonLeafPlanOperator {
-  
-  override def iterator: Iterator[Map[String, LiteralExpression]] = new Iterator[Map[String, LiteralExpression]] {
-    val _it = operand.iterator
-    override def hasNext: Boolean = _it.hasNext
+case class Projection(
+    targetVname: String,
+    expr: Expression,
+    operand: PlanOperator,
+    ktx: KernelTransaction
+) extends NonLeafPlanOperator {
 
-    override def next(): Map[String, LiteralExpression] = {
-      val row = _it.next()
-      row.concat(Map((targetVname, expr.getLiteralValue(row))))
-    }
-  }
+  override def iterator: Iterator[Map[String, LiteralExpression]] =
+    operand.map(row => row.concat(Map((targetVname, expr.getLiteralValue(row))))).iterator
 }
 
 case class CreateRelationship(
@@ -241,34 +126,39 @@ case class CreateRelationship(
     operand: PlanOperator,
     ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
-  override def iterator: Iterator[Map[String, LiteralExpression]] = new Iterator[Map[String, LiteralExpression]] {
-    var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
-    var initialized = false
+  override def iterator: Iterator[Map[String, LiteralExpression]] =
+    new Iterator[Map[String, LiteralExpression]] {
+      // this DOESN'T CHANGE the iterator at all, except that the first instace 'next'
+      // is called, it will create the relationship
 
-    def _initialize() = {
-      if !initialized then {
-        // called once when some 'next' is called
-        // - after it creates all the nodes, it just turns into a normal iterator
-        for row <- operand do {
-          val n1 = row(startColName).asInstanceOf[NodeRecord].id
-          val n2 = row(endColName).asInstanceOf[NodeRecord].id
+      var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
+      var initialized = false
 
-          val props: Map[String, LiteralExpression] = properties.map((k, v) => (k, v.getLiteralValue(row)))
-          ktx.writeApi.relationshipCreate(label, props, n1, n2)
+      def _initialize() = {
+        if !initialized then {
+          // called once when some 'next' is called
+          // - after it creates all the nodes, it just turns into a normal iterator
+          for row <- operand do {
+            val n1 = row(startColName).asInstanceOf[NodeRecord].id
+            val n2 = row(endColName).asInstanceOf[NodeRecord].id
+
+            val props: Map[String, LiteralExpression] =
+              properties.map((k, v) => (k, v.getLiteralValue(row)))
+            ktx.writeApi.relationshipCreate(label, props, n1, n2)
+          }
+          initialized = true
         }
-        initialized = true
+      }
+
+      override def hasNext: Boolean = {
+        _it.hasNext
+      }
+
+      override def next(): Map[String, LiteralExpression] = {
+        _initialize()
+        _it.next()
       }
     }
-
-    override def hasNext: Boolean = {
-      _it.hasNext
-    }
-
-    override def next(): Map[String, LiteralExpression] = {
-      _initialize()
-      _it.next()
-    }
-  }
 }
 
 case class CreateNode(
@@ -278,72 +168,78 @@ case class CreateNode(
     operand: PlanOperator,
     ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
-    // create node with label and properties
-    // - for row in rows:
-    //    create node 'n' with label and properties, and set row[colname] = 'n'
-  override def iterator: Iterator[Map[String, LiteralExpression]] = new Iterator[Map[String, LiteralExpression]] {
-    var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
-    var initialized = false
+  // this DOESN'T CHANGE the iterator at all, except that the first instace 'next'
+  // is called, it will create the node
+  // - upon further calls to 'next' it just iterates over 'operand' as normal
+  override def iterator: Iterator[Map[String, LiteralExpression]] =
+    new Iterator[Map[String, LiteralExpression]] {
+      var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
+      var initialized = false
 
-    def _initialize() = {
-      if !initialized then {
-        // called once when some 'next' is called
-        // - after it creates all the nodes, it just turns into a normal iterator
-        for row <- operand do {
-          val props: Map[String, LiteralExpression] = properties.map((k, v) => (k, v.getLiteralValue(row)))
-          ktx.writeApi.nodeCreate(label, props)
+      def _initialize() = {
+        if !initialized then {
+          // called once when some 'next' is called
+          // - after it creates all the nodes, it just turns into a normal iterator
+          for row <- operand do {
+            val props: Map[String, LiteralExpression] =
+              properties.map((k, v) => (k, v.getLiteralValue(row)))
+            ktx.writeApi.nodeCreate(label, props)
+          }
+          initialized = true
         }
-        initialized = true
+      }
+
+      override def hasNext: Boolean = {
+        _it.hasNext
+      }
+
+      override def next(): Map[String, LiteralExpression] = {
+        _initialize()
+        _it.next()
       }
     }
-
-    override def hasNext: Boolean = {
-      _it.hasNext
-    }
-
-    override def next(): Map[String, LiteralExpression] = {
-      _initialize()
-      _it.next()
-    }
-  }
 }
 
-case class DeleteVariable(vname: String, operand: PlanOperator, ktx: KernelTransaction)
-    extends NonLeafPlanOperator {
+case class DeleteVariable(
+    vname: String,
+    operand: PlanOperator,
+    ktx: KernelTransaction
+) extends NonLeafPlanOperator {
 
-  override def iterator: Iterator[Map[String, LiteralExpression]] = new Iterator[Map[String, LiteralExpression]] {
-    var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
-    var initialized = false
+  override def iterator: Iterator[Map[String, LiteralExpression]] =
+    new Iterator[Map[String, LiteralExpression]] {
+      var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
+      var initialized = false
 
-    def _initialize() = {
-      if !initialized then {
-        // called once when some 'next' is called
-        // - after it creates all the nodes, it just turns into a normal iterato
-        val nodeIdsBuf: mutable.Buffer[Int] = mutable.Buffer()
-        val relIdsBuf: mutable.Buffer[Int] = mutable.Buffer()
-        for row <- operand do {
-          val obj = row(vname)
-          obj match {
-            case n:NodeRecord => nodeIdsBuf.addOne(n.id)
-            case r:RelationshipRecord => relIdsBuf.addOne(r.id)
-            case _ => throw Exception("unexpected input to delete operator")
+      def _initialize() = {
+        if !initialized then {
+          // called once when some 'next' is called
+          // - after it creates all the nodes, it just turns into a normal iterato
+          val nodeIdsBuf: mutable.Buffer[Int] = mutable.Buffer()
+          val relIdsBuf: mutable.Buffer[Int] = mutable.Buffer()
+          for row <- operand do {
+            val obj = row(vname)
+            obj match {
+              case n: NodeRecord         => nodeIdsBuf.addOne(n.id)
+              case r: RelationshipRecord => relIdsBuf.addOne(r.id)
+              case _ => throw Exception("unexpected input to delete operator")
+            }
           }
+          relIdsBuf.foreach(relId => ktx.writeApi.relationshipDelete(relId))
+          nodeIdsBuf.foreach(nodeId => ktx.writeApi.nodeDelete(nodeId))
+          initialized = true
         }
-        relIdsBuf.foreach(relId => ktx.writeApi.relationshipDelete(relId))
-        nodeIdsBuf.foreach(nodeId => ktx.writeApi.nodeDelete(nodeId))
-        initialized = true
+      }
+
+      override def hasNext: Boolean = {
+        _it.hasNext
+      }
+
+      override def next(): Map[String, LiteralExpression] = {
+        _initialize()
+        _it.next()
       }
     }
-
-    override def hasNext: Boolean = {
-      _it.hasNext
-    }
-
-    override def next(): Map[String, LiteralExpression] = {
-      _initialize()
-      _it.next()
-    }
-  }
 
 }
 
@@ -615,4 +511,12 @@ trait PlanBuilder {
     // WHERE ...
 
   }
+}
+
+@main
+def temp() = {
+  var it1 = List(1, 2, 3).iterator
+  var it2 = List(4, 5, 6).iterator
+
+  val asd = (for x <- it1; y <- it2 yield (x, y)).map((x, y) => x + y)
 }

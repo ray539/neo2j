@@ -126,39 +126,21 @@ case class CreateRelationship(
     operand: PlanOperator,
     ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
-  override def iterator: Iterator[Map[String, LiteralExpression]] =
-    new Iterator[Map[String, LiteralExpression]] {
-      // this DOESN'T CHANGE the iterator at all, except that the first instace 'next'
-      // is called, it will create the relationship
 
-      var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
-      var initialized = false
 
-      def _initialize() = {
-        if !initialized then {
-          // called once when some 'next' is called
-          // - after it creates all the nodes, it just turns into a normal iterator
-          for row <- operand do {
-            val n1 = row(startColName).asInstanceOf[NodeRecord].id
-            val n2 = row(endColName).asInstanceOf[NodeRecord].id
+  def _createRelationship(row: Map[String, LiteralExpression]) = {
+    val n1 = row(startColName).asInstanceOf[NodeRecord].id
+    val n2 = row(endColName).asInstanceOf[NodeRecord].id
 
-            val props: Map[String, LiteralExpression] =
-              properties.map((k, v) => (k, v.getLiteralValue(row)))
-            ktx.writeApi.relationshipCreate(label, props, n1, n2)
-          }
-          initialized = true
-        }
-      }
+    val props: Map[String, LiteralExpression] =
+      properties.map((k, v) => (k, v.getLiteralValue(row)))
+    ktx.writeApi.relationshipCreate(label, props, n1, n2)
+  }
 
-      override def hasNext: Boolean = {
-        _it.hasNext
-      }
-
-      override def next(): Map[String, LiteralExpression] = {
-        _initialize()
-        _it.next()
-      }
-    }
+  override def iterator: Iterator[Map[String, LiteralExpression]] = operand.map(row => {
+    _createRelationship(row)
+    row
+  }).iterator
 }
 
 case class CreateNode(
@@ -168,36 +150,15 @@ case class CreateNode(
     operand: PlanOperator,
     ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
-  // this DOESN'T CHANGE the iterator at all, except that the first instace 'next'
-  // is called, it will create the node
-  // - upon further calls to 'next' it just iterates over 'operand' as normal
-  override def iterator: Iterator[Map[String, LiteralExpression]] =
-    new Iterator[Map[String, LiteralExpression]] {
-      var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
-      var initialized = false
+  
+  // when iterated over a row, it will create the node using that row and return it
+  override def iterator: Iterator[Map[String, LiteralExpression]] = operand.map(row => {
+    val props = properties.map((k, v) => (k, v.getLiteralValue(row)))
+    ktx.writeApi.nodeCreate(label, props)
+    row
+  }).iterator
 
-      def _initialize() = {
-        if !initialized then {
-          // called once when some 'next' is called
-          // - after it creates all the nodes, it just turns into a normal iterator
-          for row <- operand do {
-            val props: Map[String, LiteralExpression] =
-              properties.map((k, v) => (k, v.getLiteralValue(row)))
-            ktx.writeApi.nodeCreate(label, props)
-          }
-          initialized = true
-        }
-      }
 
-      override def hasNext: Boolean = {
-        _it.hasNext
-      }
-
-      override def next(): Map[String, LiteralExpression] = {
-        _initialize()
-        _it.next()
-      }
-    }
 }
 
 case class DeleteVariable(
@@ -207,6 +168,7 @@ case class DeleteVariable(
 ) extends NonLeafPlanOperator {
 
   override def iterator: Iterator[Map[String, LiteralExpression]] =
+
     new Iterator[Map[String, LiteralExpression]] {
       var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
       var initialized = false

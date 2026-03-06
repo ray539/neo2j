@@ -5,85 +5,229 @@ import scala.annotation.targetName
 
 case class QueryResult(tableData: Map[String, List[Expression]]) {}
 
-
 // these are stuff that yield iterators over ROWS
-trait PlanOperator {}
+trait PlanOperator extends Iterable[Map[String, LiteralExpression]];
 
-trait LeafPlanOperator extends PlanOperator {
-  def execute(): List[Map[String, Expression]]
-}
-
-trait NonLeafPlanOperator extends PlanOperator {
-  def execute(
-      rows: List[Map[String, Expression]]
-  ): List[Map[String, Expression]]
-}
-
+// ok, so a row is just going to be
+trait LeafPlanOperator extends PlanOperator;
+trait NonLeafPlanOperator extends PlanOperator;
 // scan database to get list of all nodes
 // produces something like
 // (a=<record1>), (a=<record2>), ...
-case class AllNodesScan(vname: String) extends LeafPlanOperator {
-  override def execute() = {
-    return null
-  }
+
+case class AllNodesScan(vname: String, ktx: KernelTransaction)
+    extends LeafPlanOperator {
+
+  override def iterator: Iterator[Map[String, LiteralExpression]] =
+    new Iterator[Map[String, LiteralExpression]] {
+      var nCursor: NodeCursor = null;
+      var initialized = false
+      def _initialize() = {
+        if !initialized then {
+          nCursor = ktx.getNodeCursor()
+          ktx.readApi.allNodesScan(nCursor)
+          initialized = true
+        }
+      }
+
+      override def hasNext: Boolean = {
+        _initialize()
+        nCursor.hasNext()
+      }
+
+      override def next(): Map[String, LiteralExpression] = {
+        _initialize()
+        val nodeId = nCursor.getNodeReference()
+        val nodeRecord = ktx.readApi.nodeById(nodeId)
+        Map((vname, nodeRecord))
+      }
+    }
 }
 
 case class EmptyResult() extends LeafPlanOperator {
-  override def execute(): List[Map[String, Expression]] = {
-    return List()
-  }
+  override def iterator: Iterator[Map[String, LiteralExpression]] =
+    Iterator.empty
 }
 
 case class EmptyRow() extends LeafPlanOperator {
-  override def execute(): List[Map[String, Expression]] = {
-    return List(Map())
-  }
+  override def iterator: Iterator[Map[String, LiteralExpression]] = List(
+    Map()
+  ).iterator
 }
-
 
 case class Filter(
     predicate: Expression,
     operand: PlanOperator
 ) extends NonLeafPlanOperator {
-  override def execute(
-      rows: List[Map[String, Expression]]
-  ): List[Map[String, Expression]] = {
-    // for every row:
-    // - apply predicate on the row, replacing 'Variable' objects as appropiate
-    // - if result ends up being 'False' (we have to evaluate the actual thing)
-    //   we just skip the row
-    return null
-  }
+
+  override def iterator: Iterator[Map[String, LiteralExpression]] =
+    new Iterator[Map[String, LiteralExpression]] {
+      var _it: Iterator[Map[String, LiteralExpression]] = null
+      var initialized = false
+
+      def _initialize() = {
+        if !initialized then {
+          _it = operand.iterator.dropWhile(row =>
+            !predicate.getLiteralValue(row).isTruthy
+          )
+          initialized = true
+        }
+      }
+
+      override def hasNext(): Boolean = {
+        _initialize()
+        _it.hasNext
+      }
+
+      override def next(): Map[String, LiteralExpression] = {
+        _initialize()
+        val ret = _it.next()
+        _it = _it.dropWhile(row => !predicate.getLiteralValue(row).isTruthy)
+        ret
+      }
+    }
 }
 
 enum RelDir {
   case Forward, Backward, Both
 }
 
+case class CProduct(left: PlanOperator, right: PlanOperator)
+    extends NonLeafPlanOperator {
+  override def iterator: Iterator[Map[String, LiteralExpression]] =
+    new Iterator[Map[String, LiteralExpression]] {
+      var _left = left.iterator
+      var _right = right.iterator
+
+      override def hasNext(): Boolean = {
+        _left.hasNext && _right.hasNext
+      }
+
+      var first = true
+      var row1: Map[String, LiteralExpression] = null;
+      var row2: Map[String, LiteralExpression] = null;
+
+      override def next(): Map[String, LiteralExpression] = {
+        assert(
+          _right.hasNext && _left.hasNext,
+          throw new NoSuchElementException("asd")
+        )
+        if first then {
+          row1 = _left.next()
+          row2 = _right.next()
+          first = false
+          row1.concat(row2)
+        } else {
+          row2 = _right.next()
+          if !_right.hasNext then {
+            _right = right.iterator
+            row2 = _right.next()
+            row1 = _left.next()
+          }
+          row1.concat(row2)
+        }
+      }
+    }
+}
+
 case class Expand(
     nodeVname: String,
     relVname: String,
     dir: RelDir,
-    operand: PlanOperator
+    operand: PlanOperator,
+    ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
-  override def execute(
-      rows: List[Map[String, Expression]]
-  ): List[Map[String, Expression]] = {
-    // for row in rows
-    //   use dir to look at the relevant outgoing / incoming edges, and add to the row under the correct name
-    return null
-  }
+  //   for row in rows
+  //      use dir to look at the relevant outgoing / incoming relationships, and add to row under name 'relVname'
+  //      add the record under
+  // }
+  override def iterator: Iterator[Map[String, LiteralExpression]] =
+    new Iterator[Map[String, LiteralExpression]] {
+
+      var _rowit: Iterator[Map[String, LiteralExpression]] = null
+      var _rCursor: RelationshipCursor = ktx.getRelationshipCursor()
+      var curRow: Option[Map[String, LiteralExpression]] = None
+
+      var initialized = false
+
+      def _initialize() = {
+        if !initialized then {
+          _rowit = operand.iterator
+          // drop while there are no relationships adjacent to 'rowit'
+          _rowit = _rowit.dropWhile(row => {
+            val nodeRecord = row(nodeVname).asInstanceOf[NodeRecord]
+            ktx.readApi.relsAdjToNodeScan(_rCursor, nodeRecord.id, dir)
+            !_rCursor.hasNext()
+          })
+
+          // get curRow
+          curRow = _rowit.nextOption()
+
+          // set _rCursor
+          if curRow.isDefined then {
+            val nodeRecord = curRow.get(nodeVname).asInstanceOf[NodeRecord]
+            ktx.readApi.relsAdjToNodeScan(_rCursor, nodeRecord.id, dir)
+            assert(_rCursor.hasNext())
+          } else {
+            _rCursor = null
+          }
+
+          initialized = true
+        }
+      }
+
+      override def hasNext: Boolean = {
+        _initialize()
+        curRow != null
+      }
+
+      override def next(): Map[String, LiteralExpression] = {
+        assert(curRow != null, throw Exception("no such element"))
+        assert(_rCursor.hasNext(), throw Exception("BUG in Expand"))
+
+        _initialize()
+
+        // get next relationship (at least one)
+        val relId = _rCursor.getRelationshipReference();
+        val rel = ktx.readApi.relationshipById(relId);
+
+        if !_rCursor.hasNext() then {
+          // move _rowit forward until nonempty found
+          _rowit = _rowit.dropWhile(row => {
+            val nodeRecord = row(nodeVname).asInstanceOf[NodeRecord]
+            ktx.readApi.relsAdjToNodeScan(_rCursor, nodeRecord.id, dir)
+            !_rCursor.hasNext()
+          })
+
+          // set _rcursor
+          curRow = _rowit.nextOption()
+          if curRow.isDefined then {
+            val nodeRecord = curRow.get(nodeVname).asInstanceOf[NodeRecord]
+            ktx.readApi.relsAdjToNodeScan(_rCursor, nodeRecord.id, dir)
+            assert(_rCursor.hasNext())
+          } else {
+            _rCursor = null
+          }
+        }
+
+        val res = curRow.get.concat(Map((relVname, rel)))
+        res
+      }
+
+    }
 }
 
-case class CProduct(left: PlanOperator, right: PlanOperator)
+case class Projection(targetVname: String, expr: Expression, operand: PlanOperator, ktx: KernelTransaction)
     extends NonLeafPlanOperator {
-  // for row_a in A
-  //    for row_b in B
-  //       row_res.append(...row_a, ...row_b)
-  override def execute(
-      rows: List[Map[String, Expression]]
-  ): List[Map[String, Expression]] = {
-    return null
+  
+  override def iterator: Iterator[Map[String, LiteralExpression]] = new Iterator[Map[String, LiteralExpression]] {
+    val _it = operand.iterator
+    override def hasNext: Boolean = _it.hasNext
+
+    override def next(): Map[String, LiteralExpression] = {
+      val row = _it.next()
+      row.concat(Map((targetVname, expr.getLiteralValue(row))))
+    }
   }
 }
 
@@ -93,56 +237,115 @@ case class CreateRelationship(
     startColName: String,
     endColName: String,
     direction: RelDir,
-    vname: String
+    vname: String,
+    operand: PlanOperator,
+    ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
-  override def execute(
-      rows: List[Map[String, Expression]]
-  ): List[Map[String, Expression]] = {
-    // for each row in rows (a, b, ...)
-    //  create an edge between startColName, endColName and name it colname
-    return null
+  override def iterator: Iterator[Map[String, LiteralExpression]] = new Iterator[Map[String, LiteralExpression]] {
+    var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
+    var initialized = false
+
+    def _initialize() = {
+      if !initialized then {
+        // called once when some 'next' is called
+        // - after it creates all the nodes, it just turns into a normal iterator
+        for row <- operand do {
+          val n1 = row(startColName).asInstanceOf[NodeRecord].id
+          val n2 = row(endColName).asInstanceOf[NodeRecord].id
+
+          val props: Map[String, LiteralExpression] = properties.map((k, v) => (k, v.getLiteralValue(row)))
+          ktx.writeApi.relationshipCreate(label, props, n1, n2)
+        }
+        initialized = true
+      }
+    }
+
+    override def hasNext: Boolean = {
+      _it.hasNext
+    }
+
+    override def next(): Map[String, LiteralExpression] = {
+      _initialize()
+      _it.next()
+    }
   }
 }
 
 case class CreateNode(
     label: String,
     properties: Map[String, Expression],
-    vname: String
+    vname: String,
+    operand: PlanOperator,
+    ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
-  override def execute(
-      rows: List[Map[String, Expression]]
-  ): List[Map[String, Expression]] = {
     // create node with label and properties
     // - for row in rows:
     //    create node 'n' with label and properties, and set row[colname] = 'n'
-    return null
+  override def iterator: Iterator[Map[String, LiteralExpression]] = new Iterator[Map[String, LiteralExpression]] {
+    var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
+    var initialized = false
+
+    def _initialize() = {
+      if !initialized then {
+        // called once when some 'next' is called
+        // - after it creates all the nodes, it just turns into a normal iterator
+        for row <- operand do {
+          val props: Map[String, LiteralExpression] = properties.map((k, v) => (k, v.getLiteralValue(row)))
+          ktx.writeApi.nodeCreate(label, props)
+        }
+        initialized = true
+      }
+    }
+
+    override def hasNext: Boolean = {
+      _it.hasNext
+    }
+
+    override def next(): Map[String, LiteralExpression] = {
+      _initialize()
+      _it.next()
+    }
   }
 }
 
-case class DeleteVariable(vname: String, operand: PlanOperator) extends NonLeafPlanOperator {
-  override def execute(
-      rows: List[Map[String, Expression]]
-  ): List[Map[String, Expression]] = {
-    // delete variable named 'vname'
-    // - if it is a node, delete node
-    // - if relationship, delete relationship
-    // - if path,
-
-    return null
-  }
-}
-
-case class Projection(targetVname: String, expr: Expression)
+case class DeleteVariable(vname: String, operand: PlanOperator, ktx: KernelTransaction)
     extends NonLeafPlanOperator {
-  override def execute(
-      rows: List[Map[String, Expression]]
-  ): List[Map[String, Expression]] = {
-    // for each row in rows
-    //   evaluate expr with variables filled by 'row' and
-    return null
-  }
-}
 
+  override def iterator: Iterator[Map[String, LiteralExpression]] = new Iterator[Map[String, LiteralExpression]] {
+    var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
+    var initialized = false
+
+    def _initialize() = {
+      if !initialized then {
+        // called once when some 'next' is called
+        // - after it creates all the nodes, it just turns into a normal iterato
+        val nodeIdsBuf: mutable.Buffer[Int] = mutable.Buffer()
+        val relIdsBuf: mutable.Buffer[Int] = mutable.Buffer()
+        for row <- operand do {
+          val obj = row(vname)
+          obj match {
+            case n:NodeRecord => nodeIdsBuf.addOne(n.id)
+            case r:RelationshipRecord => relIdsBuf.addOne(r.id)
+            case _ => throw Exception("unexpected input to delete operator")
+          }
+        }
+        relIdsBuf.foreach(relId => ktx.writeApi.relationshipDelete(relId))
+        nodeIdsBuf.foreach(nodeId => ktx.writeApi.nodeDelete(nodeId))
+        initialized = true
+      }
+    }
+
+    override def hasNext: Boolean = {
+      _it.hasNext
+    }
+
+    override def next(): Map[String, LiteralExpression] = {
+      _initialize()
+      _it.next()
+    }
+  }
+
+}
 
 trait BasePlanBuilder {
   var boundVars: mutable.Set[String] = mutable.Set()
@@ -176,6 +379,9 @@ case object PredBuilder {
 
 trait MatchClauseBuilder extends BasePlanBuilder {
 
+  val store: StorageEngine = StorageEngine()
+  val ktx: KernelTransaction = KernelTransaction(store)
+
   def visitSegment(
       leftNodeName: String,
       segment: (RelationshipPattern, NodePattern)
@@ -199,12 +405,15 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       leftNodeName,
       rname,
       dir,
-      plan
+      plan,
+      ktx
     )
     // filter so that it isn't the same as any other visited relationship
     // - in the current line
 
     filterBasedOnLabelRelationships(rp, rname)
+
+    // not quite right... have to fix this later
     visitNodePattern(np)
   }
 
@@ -213,17 +422,24 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       bindVarName: String
   ) = {
 
+    // <bindVarName>.label == p.label
+    // - here,
+    // - note that
+    // NOTE:
+    // - dk if we want to make 'label' and 'properties' accessible to user
     val pred1 = if p.label.isDefined then {
-      Some(Variable(bindVarName).getAttr("label").exprEq(p.label.get))
+      Some(Variable(bindVarName).getLabel().exprEq(p.label.get))
     } else {
       None
     }
 
+    // <bindVarName>.properties has all properties outlined in 'p'
     val pred2 = PredBuilder.hasAllProperties(
-      subject = Variable(bindVarName).getAttr("properties"),
+      subject = Variable(bindVarName).getProperties(),
       properties = p.properties
     )
 
+    // will be None if both pred1, pred2 are None
     val pred = PredBuilder.smartAnd(List(pred1, pred2))
     if pred.isDefined then {
       plan = Filter(
@@ -238,7 +454,7 @@ trait MatchClauseBuilder extends BasePlanBuilder {
     if !boundVars.contains(vname) then {
       plan = CProduct(
         plan,
-        AllNodesScan(vname)
+        AllNodesScan(vname, ktx)
       )
       boundVars.add(vname)
     }
@@ -255,13 +471,16 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       bname = np.bindVariable.name
       relationshipVnames.add(rp.bindVariable.name)
     }
+
     plan = Projection(
       targetVname = vname,
-      expr = PathConstructor(
-        ListConstructor(
+      expr = PathConstructorCall(
+        ListConstructorCall(
           relationshipVnames.toList.map(Variable(_))
         )
-      )
+      ),
+      plan,
+      ktx
     )
   }
 
@@ -272,6 +491,9 @@ trait MatchClauseBuilder extends BasePlanBuilder {
 }
 
 trait CreateClauseBuilder extends BasePlanBuilder {
+  val store: StorageEngine = StorageEngine()
+  val ktx: KernelTransaction = KernelTransaction(store)
+
   def visitSegment(
       leftNodeName: String,
       segment: (RelationshipPattern, NodePattern)
@@ -295,7 +517,9 @@ trait CreateClauseBuilder extends BasePlanBuilder {
       startColName = leftNodeName,
       endColName = rightNodeName,
       direction = dir,
-      vname = rname
+      vname = rname,
+      plan,
+      ktx
     )
   }
 
@@ -311,7 +535,9 @@ trait CreateClauseBuilder extends BasePlanBuilder {
         CreateNode(
           label = if np.label.isEmpty then "" else np.label.get,
           properties = np.properties,
-          vname = colname
+          vname = colname,
+          plan,
+          ktx
         )
       )
     }
@@ -331,11 +557,13 @@ trait CreateClauseBuilder extends BasePlanBuilder {
 
     plan = Projection(
       targetVname = colname,
-      expr = PathConstructor(
-        ListConstructor(
+      expr = PathConstructorCall(
+        ListConstructorCall(
           relationshipVnames.toList.map(Variable(_))
         )
-      )
+      ),
+      plan,
+      ktx
     )
   }
 
@@ -358,10 +586,12 @@ trait WhereClauseBuilder extends BasePlanBuilder {
 }
 
 trait DeleteClauseBuilder extends BasePlanBuilder {
+  val store: StorageEngine = StorageEngine()
+  val ktx: KernelTransaction = KernelTransaction(store)
   def visitDeleteClause(deleteClause: DeleteClause) = {
     val varnames = deleteClause.variables.map(_.name)
     for vname <- varnames do {
-      plan = DeleteVariable(vname, plan)
+      plan = DeleteVariable(vname, plan, ktx)
     }
   }
 }

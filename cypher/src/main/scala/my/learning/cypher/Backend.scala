@@ -5,20 +5,6 @@ import com.ibm.icu.impl.Relation
 import com.ibm.icu.impl.locale.LocaleDistance.Data
 import scala.collection.mutable.ListBuffer
 
-case class NodeRecord(
-  id: Int,
-  label: String,
-  properties: Map[String, AnyRef]
-)
-
-
-case class RelationshipRecord(
-  id: Int,
-  label: String,
-  properties: Map[String, AnyRef],
-  startNode: Int,
-  endNode: Int,
-)
 
 
 /**
@@ -142,7 +128,7 @@ class TxState(store: StorageEngine) {
     }
   }
 
-  def createNode(label: String, props: Map[String, AnyRef]) = {
+  def createNode(label: String, props: Map[String, LiteralExpression]) = {
     val newId = store.getNextId
     val nodeRecord = NodeRecord(newId, label, props)
     assert(!nodeIdsToCreate.contains(newId))
@@ -191,7 +177,7 @@ class TxState(store: StorageEngine) {
     }
   }
 
-  def createRel(label: String, props: Map[String, AnyRef], startNode: Int, endNode: Int) = {
+  def createRel(label: String, props: Map[String, LiteralExpression], startNode: Int, endNode: Int) = {
     val newId = store.getNextId
     val rel = RelationshipRecord(newId, label, props, startNode, endNode)
     assert(!relIdsToCreate.contains(newId))
@@ -203,14 +189,20 @@ class TxState(store: StorageEngine) {
   def apply(store: StorageEngine) = {
     // apply everything to the actual store
     // - vallidity checks already checked above, so don't need to worry...
+    for rr <- idToRelToCreate.values do {
+      store.createRelationship(rr)
+    }
+
+    for rId <- relIdsToDel do {
+      store.deleteRelationship(rId)
+    }
+
     for nr <- idToNodeToCreate.values do {
       store.createNode(nr)
     }
-    for nr <- nodeIdsToDel do {
-      
+    for nId <- nodeIdsToDel do {
+      store.deleteNode(nId)
     }
-    
-
   }
 }
 
@@ -241,7 +233,7 @@ class DataRead(store: StorageEngine, txState: TxState) {
 
 class DataWrite(store: StorageEngine, txState: TxState) {
   // these functions must change txState only
-  def nodeCreate(label: String, props: Map[String, AnyRef]) = {
+  def nodeCreate(label: String, props: Map[String, LiteralExpression]) = {
     txState.createNode(label, props)
   }
 
@@ -249,7 +241,7 @@ class DataWrite(store: StorageEngine, txState: TxState) {
     txState.markNodeDeleted(nodeId)
   }
 
-  def relationshipCreate(label: String, props: Map[String, AnyRef], startNode: Int, endNode: Int) = {
+  def relationshipCreate(label: String, props: Map[String, LiteralExpression], startNode: Int, endNode: Int) = {
     txState.createRel(label, props, startNode, endNode)
   }
 

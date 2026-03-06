@@ -324,11 +324,3 @@ def main() =
 
   // println(tree.toStringTree(parser)) // enrich with parser to get further information
   Trees.inspect(tree, parser)
-
-  
-
-  // val walker: ParseTreeWalker = ParseTreeWalker()
-
-  // val builder: StatementBuilder = StatementBuilder()
-
-  // walker.walk(builder, tree)

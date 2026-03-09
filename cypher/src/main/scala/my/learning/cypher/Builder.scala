@@ -47,38 +47,18 @@ import my.learning.generated.Cypher.IndexContext
 import java.util.function.BinaryOperator
 import scala.collection.mutable
 
-// case class Node(
-//     id: Option[String],
-//     label: Option[String],
-//     properties: Map[String, AnyRef]
-// ) {}
-// case class Relationship(
-//     id: Option[String], // if None, create request otherwise...
-//     label: String,
-//     properties: Map[String, AnyRef],
-//     start: Node,
-//     end: Node
-// ) {}
-
-// types
-// - expression2 ((ADD | SUB) expression2)*
-// - expression2
-
-// case class PatternListWrapper(pl: List[Pattern]) extends ASTNode
-// case class PathWrapper(segments: List[(NodePattern, RelationshipPattern)], finalNode: Node)
-
-
 // trait because we want class which can extend this to inherit the functionality
 // (this is the 'mixin' pattern)
-trait StatementBuilder extends CypherBaseVisitor[AnyRef] {
-
+class StatementBuilder() extends CypherBaseVisitor[AnyRef] {
 
   def genVarname() = "TODO"
 
-  override def visitStatement(ctx: StatementContext): AnyRef = 
-    return (for clauseCtx <- ctx.clause.asScala yield visitClause(clauseCtx)).toList
+  override def visitStatement(ctx: StatementContext): Statement =
+    val clauses =
+      (for clauseCtx <- ctx.clause.asScala yield visitClause(clauseCtx)).toList
+    Statement(clauses)
 
-  override def visitClause(ctx: ClauseContext): Clause = 
+  override def visitClause(ctx: ClauseContext): Clause =
     if ctx.createClause() != null then
       return visitCreateClause(ctx.createClause())
     else if ctx.matchClause() != null then
@@ -92,15 +72,16 @@ trait StatementBuilder extends CypherBaseVisitor[AnyRef] {
   override def visitCreateClause(ctx: CreateClauseContext): CreateClause =
     return CreateClause(visitPatternList(ctx.patternList()))
 
-  override def visitMatchClause(ctx: MatchClauseContext): MatchClause = 
+  override def visitMatchClause(ctx: MatchClauseContext): MatchClause =
     val v = visitPattern(ctx.pattern())
     return MatchClause(v)
 
-  override def visitDeleteClause(ctx: DeleteClauseContext): DeleteClause = 
-    val vars = (for varctx <- ctx.variable().asScala yield visitVariable(varctx)).toList
+  override def visitDeleteClause(ctx: DeleteClauseContext): DeleteClause =
+    val vars =
+      (for varctx <- ctx.variable().asScala yield visitVariable(varctx)).toList
     return DeleteClause(vars)
 
-  override def visitWhereClause(ctx: WhereClauseContext): WhereClause = 
+  override def visitWhereClause(ctx: WhereClauseContext): WhereClause =
     return WhereClause(visitExpression(ctx.expression()))
 
   override def visitPatternList(ctx: PatternListContext): List[Pattern] =
@@ -109,7 +90,9 @@ trait StatementBuilder extends CypherBaseVisitor[AnyRef] {
   // fill in bind variable
   // - if nothing, we have to fill in something because
   override def visitPattern(ctx: PatternContext): Pattern =
-    val vname = if ctx.variable() != null then visitVariable(ctx.variable()) else Variable(genVarname())
+    val vname =
+      if ctx.variable() != null then visitVariable(ctx.variable())
+      else Variable(genVarname())
     return visitPatternElement(ctx.patternElement()).copy(bindVariable = vname)
 
   // no bind variable
@@ -304,23 +287,38 @@ trait StatementBuilder extends CypherBaseVisitor[AnyRef] {
       return StringLiteral(ctx.STRING_LITERAL().getText())
     else if ctx.INTEGER_LITERAL() != null then
       return IntLiteral(ctx.INTEGER_LITERAL().getText().toInt)
-    else if ctx.TRUE() != null then return BoolLiteral(ctx.TRUE().getText().toLowerCase.toBoolean)
-    else if ctx.FALSE() != null then return BoolLiteral(ctx.FALSE().getText().toLowerCase.toBoolean)
+    else if ctx.TRUE() != null then
+      return BoolLiteral(ctx.TRUE().getText().toLowerCase.toBoolean)
+    else if ctx.FALSE() != null then
+      return BoolLiteral(ctx.FALSE().getText().toLowerCase.toBoolean)
     return null
 }
 
+case class A(x: Int, y: Int, a2: List[A])
+
 @main
 def main() =
-  val input: CharStream =
-    CharStreams.fromString("CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)")
-  val lexer: CypherLexer = CypherLexer(input)
-  val tokens: CommonTokenStream = CommonTokenStream(lexer)
+  val a = A(1, 2, List())
+  val b = A(1, 2, List())
+  print(List(1, 2, 3) == List(1, 2, 3))
+  print(a == b)
 
-  tokens.fill()
-  tokens.getTokens.forEach(println)
+  val c = mutable.ListBuffer(1, 2)
+  val d = mutable.ListBuffer(1, 2)
+  println(c == d)
 
-  val parser: Cypher = Cypher(tokens)
-  val tree: ParseTree = parser.statement();
+  // val input: CharStream =
+  //   CharStreams.fromString("CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)")
+  // val lexer: CypherLexer = CypherLexer(input)
+  // val tokens: CommonTokenStream = CommonTokenStream(lexer)
+
+  // // tokens.fill()
+  // // tokens.getTokens.forEach(println)
+
+  // val parser: Cypher = Cypher(tokens)
+  // val tree: ParseTree = parser.statement();
+  // val sb = StatementBuilder()
+  // val ast = sb.visitStatement(tree.asInstanceOf[StatementContext])
 
   // println(tree.toStringTree(parser)) // enrich with parser to get further information
-  Trees.inspect(tree, parser)
+  // Trees.inspect(tree, parser)

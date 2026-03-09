@@ -213,6 +213,8 @@ case class DeleteVariable(
 trait BasePlanBuilder {
   var boundVars: mutable.Set[String] = mutable.Set()
   var plan: PlanOperator = EmptyRow()
+  val store: StorageEngine = StorageEngine()
+  val ktx: KernelTransaction = KernelTransaction(store)
 }
 
 case object PredBuilder {
@@ -244,10 +246,9 @@ def genAnonVarName = "asd";
 
 trait MatchClauseBuilder extends BasePlanBuilder {
 
-  val store: StorageEngine = StorageEngine()
-  val ktx: KernelTransaction = KernelTransaction(store)
 
-  def visitSegment(
+
+  def visitMatchSegment(
       leftNodeName: String,
       segment: (RelationshipPattern, NodePattern)
   ): Unit = {
@@ -312,7 +313,7 @@ trait MatchClauseBuilder extends BasePlanBuilder {
         ktx
       )
       // do the Cproduct again to populate other field
-      visitNodePattern(np)
+      visitMatchNodePattern(np)
   }
 
   def filterBasedOnLabelRelationships(
@@ -348,7 +349,7 @@ trait MatchClauseBuilder extends BasePlanBuilder {
     }
   }
 
-  def visitNodePattern(np: NodePattern) = {
+  def visitMatchNodePattern(np: NodePattern) = {
     val vname = np.bindVariable.name
     if !boundVars.contains(vname) then {
       plan = CProduct(
@@ -360,13 +361,13 @@ trait MatchClauseBuilder extends BasePlanBuilder {
     filterBasedOnLabelRelationships(np, vname)
   }
 
-  def visitPattern(p: Pattern) = {
+  def visitMatchPattern(p: Pattern) = {
     val pathVname = p.bindVariable.name
     val relationshipVnames: mutable.Set[String] = mutable.Set()
-    visitNodePattern(p.firstNode)
+    visitMatchNodePattern(p.firstNode)
     var bname = p.firstNode.bindVariable.name
     for (rp, np) <- p.segments do {
-      visitSegment(bname, (rp, np))
+      visitMatchSegment(bname, (rp, np))
       bname = np.bindVariable.name
       relationshipVnames.add(rp.bindVariable.name)
     }
@@ -385,15 +386,12 @@ trait MatchClauseBuilder extends BasePlanBuilder {
 
   def visitMatchClause(matchClause: MatchClause) = {
     val pattern = matchClause.pattern
-    visitPattern(pattern)
+    visitMatchPattern(pattern)
   }
 }
 
 trait CreateClauseBuilder extends BasePlanBuilder {
-  val store: StorageEngine = StorageEngine()
-  val ktx: KernelTransaction = KernelTransaction(store)
-
-  def visitSegment(
+  def visitCreateSegment(
       leftNodeName: String,
       segment: (RelationshipPattern, NodePattern)
   ): Unit = {
@@ -409,7 +407,7 @@ trait CreateClauseBuilder extends BasePlanBuilder {
     val rightNodeName = np.bindVariable.name
 
     // create next node pattern first
-    visitNodePattern(np)
+    visitCreateNodePattern(np)
     plan = CreateRelationship(
       label = if rp.label.isEmpty then "" else rp.label.get,
       properties = rp.properties,
@@ -422,7 +420,7 @@ trait CreateClauseBuilder extends BasePlanBuilder {
     )
   }
 
-  def visitNodePattern(np: NodePattern) = {
+  def visitCreateNodePattern(np: NodePattern) = {
     val colname = np.bindVariable.name
     if boundVars.contains(colname) then {
       assert(np.label.isEmpty && np.properties.isEmpty)
@@ -442,15 +440,15 @@ trait CreateClauseBuilder extends BasePlanBuilder {
     }
   }
 
-  def visitPattern(p: Pattern) = {
+  def visitCreatePattern(p: Pattern) = {
     val colname = p.bindVariable.name
-    visitNodePattern(p.firstNode)
+    visitCreateNodePattern(p.firstNode)
     var bname = p.firstNode.bindVariable.name
 
     val relationshipVnames: mutable.Set[String] = mutable.Set()
     for (rp, np) <- p.segments do {
       relationshipVnames.add(rp.bindVariable.name)
-      visitSegment(bname, (rp, np))
+      visitCreateSegment(bname, (rp, np))
       bname = np.bindVariable.name
     }
 
@@ -469,14 +467,12 @@ trait CreateClauseBuilder extends BasePlanBuilder {
   def visitCreateClause(createClause: CreateClause) = {
     val patterns = createClause.patterns
     for p <- patterns do {
-      visitPattern(p)
+      visitCreatePattern(p)
     }
   }
 }
 
 trait WhereClauseBuilder extends BasePlanBuilder {
-  val store: StorageEngine = StorageEngine()
-  val ktx: KernelTransaction = KernelTransaction(store)
 
   def visitWhereClause(whereClause: WhereClause) = {
     val expr = whereClause.expr
@@ -489,8 +485,7 @@ trait WhereClauseBuilder extends BasePlanBuilder {
 }
 
 trait DeleteClauseBuilder extends BasePlanBuilder {
-  val store: StorageEngine = StorageEngine()
-  val ktx: KernelTransaction = KernelTransaction(store)
+
   def visitDeleteClause(deleteClause: DeleteClause) = {
     val varnames = deleteClause.variables.map(_.name)
     for vname <- varnames do {
@@ -499,29 +494,30 @@ trait DeleteClauseBuilder extends BasePlanBuilder {
   }
 }
 
-trait PlanBuilder {
+class PlanBuilder() extends CreateClauseBuilder with MatchClauseBuilder with DeleteClauseBuilder with WhereClauseBuilder {
   def visitClause(clause: Clause) = {
     clause match
-      case CreateClause(patterns)  =>
-      case MatchClause(pattern)    =>
-      case DeleteClause(variables) =>
-      case WhereClause(expr)       =>
+      case c:CreateClause  => visitCreateClause(c)
+      case m:MatchClause  => visitMatchClause(m)
+      case d:DeleteClause => visitDeleteClause(d)
+      case w:WhereClause  => visitWhereClause(w)
   }
 
-  def executeStatement(statement: Statement): Unit = {
-    // execution plan
-    // - we want to turn the statement into these operators
-    // - then, we can evaluate the plan
-
-    // MATCH ...
-    // MATCH ...
-    // WHERE ...
-
+  def getPhysicalPlan(statement: Statement) = {
+    val clauses = statement.clauses
+    for clause <- clauses do {
+      visitClause(clause)
+    }
+    plan
   }
 }
 
+
 @main
 def temp() = {
+  // 1 + 2
+  // 1.+(2)
+
   var it1 = List(1, 2, 3).iterator
   var it2 = List(4, 5, 6).iterator
 

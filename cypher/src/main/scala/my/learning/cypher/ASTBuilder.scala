@@ -51,7 +51,12 @@ import scala.collection.mutable
 // (this is the 'mixin' pattern)
 class StatementBuilder() extends CypherBaseVisitor[AnyRef] {
 
-  def genVarname() = "TODO"
+  var curId = 0
+  def genVarname() = {
+    val ret = s"_$$generated$curId"
+    curId += 1
+    ret
+  }
 
   override def visitStatement(ctx: StatementContext): Statement =
     val clauses =
@@ -294,31 +299,20 @@ class StatementBuilder() extends CypherBaseVisitor[AnyRef] {
     return null
 }
 
-case class A(x: Int, y: Int, a2: List[A])
-
 @main
 def main() =
-  val a = A(1, 2, List())
-  val b = A(1, 2, List())
-  print(List(1, 2, 3) == List(1, 2, 3))
-  print(a == b)
 
-  val c = mutable.ListBuffer(1, 2)
-  val d = mutable.ListBuffer(1, 2)
-  println(c == d)
+  val input: CharStream =
+    CharStreams.fromString("CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)")
+  val lexer: CypherLexer = CypherLexer(input)
+  val tokens: CommonTokenStream = CommonTokenStream(lexer)
 
-  // val input: CharStream =
-  //   CharStreams.fromString("CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)")
-  // val lexer: CypherLexer = CypherLexer(input)
-  // val tokens: CommonTokenStream = CommonTokenStream(lexer)
+  val parser: Cypher = Cypher(tokens)
+  val tree: ParseTree = parser.statement();
+  val sb = StatementBuilder()
+  val ast = sb.visitStatement(tree.asInstanceOf[StatementContext])
 
-  // // tokens.fill()
-  // // tokens.getTokens.forEach(println)
+  
 
-  // val parser: Cypher = Cypher(tokens)
-  // val tree: ParseTree = parser.statement();
-  // val sb = StatementBuilder()
-  // val ast = sb.visitStatement(tree.asInstanceOf[StatementContext])
-
-  // println(tree.toStringTree(parser)) // enrich with parser to get further information
-  // Trees.inspect(tree, parser)
+  println(tree.toStringTree(parser)) // enrich with parser to get further information
+  Trees.inspect(tree, parser)

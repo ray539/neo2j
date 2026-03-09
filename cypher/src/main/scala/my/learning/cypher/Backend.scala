@@ -261,8 +261,10 @@ class KernelTransaction(store: StorageEngine) {
 
   def commit() = {
     // apply all the chages in txState to the actual store
+    txState.apply(store)
   }
 
   def rollback() = {
+    // can't do anything :)
   }
 }

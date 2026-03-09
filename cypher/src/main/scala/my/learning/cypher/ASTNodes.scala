@@ -7,7 +7,9 @@ import scala.math.pow
 
 // AST: simplified parse tree
 // - a lot of it is just a copy of the parse tree really
-sealed trait ASTNode;
+sealed trait ASTNode {
+  def accept[T](visitor: ASTVisitor[T]): T
+};
 
 trait HasLabelAndProperties {
   def label: Option[String]
@@ -21,14 +23,20 @@ case class RelationshipPattern(
     leftArrow: Boolean,
     rightArrow: Boolean
 ) extends ASTNode,
-      HasLabelAndProperties
+      HasLabelAndProperties {
+
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitRelationshipPattern(this)
+}
+
 
 case class NodePattern(
     bindVariable: Variable,
     label: Option[String],
     properties: Map[String, Expression]
 ) extends ASTNode,
-      HasLabelAndProperties
+      HasLabelAndProperties {
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitNodePattern(this)
+}
 
 // node, relationship, node, relationship ...
 // (noe, relationship)* node
@@ -36,20 +44,30 @@ case class Pattern(
     bindVariable: Variable,
     firstNode: NodePattern,
     segments: List[(RelationshipPattern, NodePattern)]
-) extends ASTNode
+) extends ASTNode {
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitPattern(this)
+}
 
-case class Statement(clauses: List[Clause]) extends ASTNode {}
+case class Statement(clauses: List[Clause]) extends ASTNode {
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitStatement(this)
+}
 
 sealed trait Clause extends ASTNode
-case class CreateClause(patterns: List[Pattern]) extends Clause
-case class MatchClause(pattern: Pattern) extends Clause
-case class DeleteClause(variables: List[Variable]) extends Clause
-case class WhereClause(expr: Expression) extends Clause
+case class CreateClause(patterns: List[Pattern]) extends Clause {
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitCreateClause(this)
+}
 
-// sealed trait DVal
-// case class DInt(value: Int)
-// case class DStr(value: String)
-// case class DBool(value: Boolean)
+case class MatchClause(pattern: Pattern) extends Clause {
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitMatchClause(this)
+}
+
+case class DeleteClause(variables: List[Variable]) extends Clause {
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitDeleteClause(this)
+}
+
+case class WhereClause(expr: Expression) extends Clause {
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitWhereClause(this)
+}
 
 // expressions
 //  (1 + 2) / 3 + a + TRUE / FALSE
@@ -354,6 +372,9 @@ case class BinaryExpression(
     val rval = right.getLiteralValue(varValues, ktx)
     operator.binOp(lval, rval)
   }
+
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitBinaryExpression(this)
+
 }
 
 // case object Not extends UnaryOperator
@@ -368,6 +389,9 @@ case class UnaryExpression(operator: Operator, operand: Expression)
     val cval = operand.getLiteralValue(varValues, ktx)
     operator.unOp(cval)
   }
+
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitUnaryExpression(this)
+
 }
 
 case class Variable(name: String) extends Expression {
@@ -378,10 +402,13 @@ case class Variable(name: String) extends Expression {
   ): LiteralExpression = {
     varValues(name)
   }
+
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitVariable(this)
 }
 
 trait LiteralExpression extends Expression {
   def isTruthy: Boolean
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitLiteralExpression(this)
 }
 
 case class IntLiteral(value: Int) extends LiteralExpression {
@@ -470,6 +497,8 @@ case class ListConstructorCall(values: Seq[Expression]) extends Expression {
   ): ListLiteral = {
     ListLiteral(values.map(v => v.getLiteralValue(varValues, ktx)).toList)
   }
+
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitListConstructorCall(this)
 }
 
 case class NodeRecord(
@@ -533,4 +562,5 @@ case class PathConstructorCall(relationships: Expression) extends Expression {
       case _                => throw Exception("expected list")
     }
   }
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitPathConstructorCall(this)
 }

@@ -215,6 +215,13 @@ trait BasePlanBuilder {
   var plan: PlanOperator = EmptyRow()
   val store: StorageEngine = StorageEngine()
   val ktx: KernelTransaction = KernelTransaction(store)
+
+  var anonId = 0
+  def genAnonVarName = {
+    val ret = s"_$$anon$anonId"
+    anonId += 1
+    ret
+  }
 }
 
 case object PredBuilder {
@@ -242,7 +249,6 @@ case object PredBuilder {
   }
 }
 
-def genAnonVarName = "asd";
 
 trait MatchClauseBuilder extends BasePlanBuilder {
 

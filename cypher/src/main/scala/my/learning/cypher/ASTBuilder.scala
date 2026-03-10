@@ -46,10 +46,11 @@ import scala.jdk.CollectionConverters.*
 import my.learning.generated.Cypher.IndexContext
 import java.util.function.BinaryOperator
 import scala.collection.mutable
+import my.learning.generated.Cypher.ReturnClauseContext
 
 // trait because we want class which can extend this to inherit the functionality
 // (this is the 'mixin' pattern)
-class StatementBuilder() extends CypherBaseVisitor[AnyRef] {
+class StatementBuilder extends CypherBaseVisitor[AnyRef] {
 
   var curId = 0
   def genVarname() = {
@@ -72,6 +73,8 @@ class StatementBuilder() extends CypherBaseVisitor[AnyRef] {
       return visitDeleteClause(ctx.deleteClause())
     else if ctx.whereClause() != null then
       return visitWhereClause(ctx.whereClause())
+    else if ctx.returnClause() != null then
+      return visitReturnClause(ctx.returnClause())
     return null
 
   override def visitCreateClause(ctx: CreateClauseContext): CreateClause =
@@ -85,6 +88,11 @@ class StatementBuilder() extends CypherBaseVisitor[AnyRef] {
     val vars =
       (for varctx <- ctx.variable().asScala yield visitVariable(varctx)).toList
     return DeleteClause(vars)
+
+  override def visitReturnClause(ctx: ReturnClauseContext): ReturnClause =
+    val vars =
+      (for varctx <- ctx.variable().asScala yield visitVariable(varctx)).toList
+    return ReturnClause(vars)
 
   override def visitWhereClause(ctx: WhereClauseContext): WhereClause =
     return WhereClause(visitExpression(ctx.expression()))
@@ -152,8 +160,10 @@ class StatementBuilder() extends CypherBaseVisitor[AnyRef] {
   ): Map[String, Expression] =
     val ids = ctx.ID()
     val exprs = ctx.expression()
-    val pairs = (for idx <- (0 until ids.size())
-    yield (ids.get(idx).getText(), visitExpression(exprs.get(idx)))).toList
+    val pairs = (
+      for idx <- (0 until ids.size())
+      yield (ids.get(idx).getText(), visitExpression(exprs.get(idx)))
+    ).toList
 
     return pairs.toMap
 
@@ -299,24 +309,63 @@ class StatementBuilder() extends CypherBaseVisitor[AnyRef] {
     return null
 }
 
+class CollectingErrorListener extends BaseErrorListener {
+  val errors: mutable.ListBuffer[String] = mutable.ListBuffer()
+  override def syntaxError(
+      recognizer: Recognizer[?, ?],
+      offendingSymbol: Object,
+      line: Int,
+      charPositionInLine: Int,
+      msg: String,
+      e: RecognitionException
+  ): Unit = {
+    errors.addOne(s"line $line:$charPositionInLine $msg")
+  }
 
+}
 
+object ASTParser {
+  def parseAST(input: String) = {
+    val cs: CharStream = CharStreams.fromString(input)
+    val lexer: CypherLexer = CypherLexer(cs)
+    val tokens: CommonTokenStream = CommonTokenStream(lexer)
+    val parser: Cypher = Cypher(tokens)
 
+    val errorListener = CollectingErrorListener()
+    lexer.removeErrorListeners()
+    parser.removeErrorListeners()
+    lexer.addErrorListener(errorListener)
+    parser.addErrorListener(errorListener)
+
+    val tree: ParseTree = parser.statement(); // build tree
+
+    if (errorListener.errors.size > 0) then {
+      throw Exception(
+        "Parse errors:\n" + errorListener.errors.mkString("\n")
+      )
+    }
+
+    val sb = StatementBuilder()
+    sb.visitStatement(tree.asInstanceOf[StatementContext])
+  }
+}
 
 @main
 def main() =
 
+  val text =
+    "RETURN a, b, c" // "CREATE ({x: 0})" // "CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)"
   val input: CharStream =
-    CharStreams.fromString("CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)")
+    CharStreams.fromString(text)
   val lexer: CypherLexer = CypherLexer(input)
   val tokens: CommonTokenStream = CommonTokenStream(lexer)
 
   val parser: Cypher = Cypher(tokens)
   val tree: ParseTree = parser.statement();
-  val sb = StatementBuilder()
-  val ast = sb.visitStatement(tree.asInstanceOf[StatementContext])
+  // val sb = StatementBuilder()
+  // val ast = sb.visitStatement(tree.asInstanceOf[StatementContext])
 
-  
-
-  println(tree.toStringTree(parser)) // enrich with parser to get further information
+  println(
+    tree.toStringTree(parser)
+  ) // enrich with parser to get further information
   Trees.inspect(tree, parser)

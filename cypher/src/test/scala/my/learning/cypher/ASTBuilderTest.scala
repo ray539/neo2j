@@ -3,6 +3,7 @@ package my.learning.cypher
 import org.scalatest.funsuite.AnyFunSuite
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.*;
+import org.antlr.v4.gui.Trees
 import my.learning.cypher.*;
 import my.learning.generated.*;
 import my.learning.generated.Cypher.*;
@@ -28,10 +29,31 @@ class ExampleTest extends AnyFunSuite {
     println(x)
   }
 
+  test("temp") {
+    val stmt1 = TestHelper.statementFromString("CREATE (a:A)")
+    val printer = ASTPrinter()
+    val x = stmt1.accept(printer)
+    println(x)
+  }
+
   test("create where") {
     val where = TestHelper.statementFromString("WHERE a >= 2 AND 1 + 2 = 3")
     val printer = ASTPrinter()
     val x = where.accept(printer)
+    println(x)
+  }
+
+  test("create properties") {
+    val input = TestHelper.statementFromString("CREATE ({x: 0})")
+    val printer = ASTPrinter()
+    val x = input.accept(printer)
+    println(x)
+  }
+
+  test("return") {
+    val input = TestHelper.statementFromString("RETURN a,b,c")
+    val printer = ASTPrinter()
+    val x = input.accept(printer)
     println(x)
   }
 

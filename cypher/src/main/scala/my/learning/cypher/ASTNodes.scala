@@ -65,6 +65,11 @@ case class DeleteClause(variables: List[Variable]) extends Clause {
   override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitDeleteClause(this)
 }
 
+case class ReturnClause(variables: List[Variable]) extends Clause {
+  override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitReturnClause(this)
+
+}
+
 case class WhereClause(expr: Expression) extends Clause {
   override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitWhereClause(this)
 }
@@ -353,8 +358,21 @@ case object GetAttr extends Operator {
   }
 }
 case object Index extends Operator
-case object GetLabel extends Operator
-case object GetProperties extends Operator
+case object GetLabel extends Operator {
+  override def unOp(operand: LiteralExpression): LiteralExpression = {
+    operand match
+      case n: NodeRecord => StringLiteral(n.label)
+      case r: RelationshipRecord => StringLiteral(r.label)  
+  }
+}
+case object GetProperties extends Operator {
+  override def unOp(operand: LiteralExpression): LiteralExpression = {
+    operand match
+      case n: NodeRecord => MapLiteral(n.properties)
+      case r: RelationshipRecord => MapLiteral(r.properties)  
+  }
+}
+
 case object GetStartNode extends Operator
 case object GetEndNode extends Operator
 

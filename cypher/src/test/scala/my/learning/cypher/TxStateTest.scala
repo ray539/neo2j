@@ -68,4 +68,18 @@ class TxStateTest extends AnyFunSuite {
 
     assertThrows[Exception](tx.markNodeDeleted(0))
   }
+
+  test("ktx - claw") {
+    val store = StorageEngine()
+    val ktx1 = KernelTransaction(store)
+    ktx1.writeApi.nodeCreate("A", Map(("x", IntLiteral(0))))
+    ktx1.writeApi.nodeCreate("A", Map(("x", IntLiteral(1))))
+    ktx1.writeApi.nodeCreate("A", Map(("x", IntLiteral(2))))
+    ktx1.writeApi.nodeCreate("A", Map(("x", IntLiteral(3))))
+
+    ktx1.writeApi.relationshipCreate("R", Map(), 0, 1)
+    ktx1.writeApi.relationshipCreate("R", Map(), 0, 2)
+    ktx1.writeApi.relationshipCreate("R", Map(), 0, 3)
+    ktx1.commit()
+  }
 }

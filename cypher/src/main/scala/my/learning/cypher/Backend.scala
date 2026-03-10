@@ -12,22 +12,32 @@ import scala.collection.mutable.ListBuffer
   */
 class StorageEngine {
   val idToNodeRecord: mutable.Map[Int, NodeRecord] = mutable.Map()
-  val idToRelationshipRecord: mutable.Map[Int, RelationshipRecord] = mutable.Map()
-
   val nodeToOutgoing: mutable.Map[Int, mutable.Set[Int]] = mutable.Map()
   val nodeToIncoming: mutable.Map[Int, mutable.Set[Int]] = mutable.Map()
+
+  val idToRelationshipRecord: mutable.Map[Int, RelationshipRecord] = mutable.Map()
+
+
 
   private var nextId = 0;
 
   def createNode(node: NodeRecord) = {
+    println(s"se.createNode ${node}")
     idToNodeRecord(node.id) = node
+    nodeToOutgoing(node.id) = mutable.Set()
+    nodeToIncoming(node.id) = mutable.Set()
   }
 
+
   def deleteNode(nodeId: Int) = {
+    assert(idToNodeRecord.contains(nodeId), s"error: nodeId: $nodeId doens't exist")
     idToNodeRecord.remove(nodeId)
+    nodeToOutgoing.remove(nodeId)
+    nodeToIncoming.remove(nodeId)
   }
 
   def createRelationship(rel: RelationshipRecord) = {
+    assert(idToNodeRecord.contains(rel.startNode) && idToNodeRecord.contains(rel.endNode), "error: one of start node / end node doesn't exist")
     idToRelationshipRecord(rel.id) = rel
     nodeToOutgoing(rel.startNode).add(rel.id)
     nodeToIncoming(rel.endNode).add(rel.id)
@@ -193,10 +203,12 @@ class TxState(store: StorageEngine) {
   }
 
   def createRel(label: String, props: Map[String, LiteralExpression], startNode: Int, endNode: Int) = {
+    println(s"tx.createRel ${startNode} ${endNode}")
     val newId = store.getNextId
     val rel = RelationshipRecord(newId, label, props, startNode, endNode)
     
     _createRel(rel)
+
     nodeToEffectiveOutDegree(rel.startNode) = getEffectiveOutDegree(rel.startNode) + 1
     nodeToEffectiveInDegree(rel.endNode) = getEffectiveInDegree(rel.endNode) + 1
     newId
@@ -206,19 +218,22 @@ class TxState(store: StorageEngine) {
     // apply everything to the actual store
     // - we modify relationships before nodes for obvious reasons
     // - vallidity checks already checked above, so don't need to worry... (in theory)
+    for nr <- idToNodeToCreate.values do {
+      store.createNode(nr)
+    }
     for rr <- idToRelToCreate.values do {
       store.createRelationship(rr)
     }
+
     for rId <- relIdsToDel do {
       store.deleteRelationship(rId)
-    }
-
-    for nr <- idToNodeToCreate.values do {
-      store.createNode(nr)
     }
     for nId <- nodeIdsToDel do {
       store.deleteNode(nId)
     }
+
+
+
   }
 }
 

@@ -9,8 +9,8 @@ options {
 
 test: CREATE;
 
-statement: clause+;
-clause: createClause | matchClause | deleteClause | whereClause;
+statement: clause+ EOF;
+clause: createClause | matchClause | deleteClause | whereClause | returnClause;
 
 createClause: CREATE patternList;
 // could be patternList to match a 'cartesian product', but don't worry for now
@@ -22,6 +22,8 @@ deleteClause: DELETE variable (COMMA variable)*;
 
 whereClause: WHERE expression;
 
+returnClause: RETURN variable (COMMA variable)*;
+
 patternList: pattern (COMMA pattern)*;
 pattern: (variable EQ)? patternElement;
 
@@ -30,7 +32,7 @@ patternElement: (nodePattern (relationshipPattern nodePattern)*);
 // semantic analysis: - if both end pointed, undirected - if one end pointed, directed - if no end
 // pointed, undirected () - [r] -> ()
 relationshipPattern:
-	LT? DASH (LBRACKET variable? labelExpression? RBRACKET) DASH GT?;
+	LT? SUB (LBRACKET variable? labelExpression? RBRACKET) SUB GT?;
 
 nodePattern:
 	LPAREN variable? labelExpression? properties? RPAREN;

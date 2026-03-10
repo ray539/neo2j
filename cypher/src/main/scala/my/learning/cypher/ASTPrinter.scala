@@ -5,6 +5,7 @@ trait ASTVisitor[T] {
   def visitCreateClause(node: CreateClause): T
   def visitMatchClause(node: MatchClause): T
   def visitDeleteClause(node: DeleteClause): T
+  def visitReturnClause(node: ReturnClause): T
   def visitWhereClause(node: WhereClause): T
   def visitPattern(node: Pattern): T
   def visitNodePattern(node: NodePattern): T
@@ -56,6 +57,17 @@ class ASTPrinter extends ASTVisitor[String] {
       node.patterns.map(_.accept(this)).map(indent).mkString(",\n")
 
     s"""CreateClause(
+       |  List(
+       |$pats
+       |  )
+       |)""".stripMargin
+  }
+
+  override def visitReturnClause(node: ReturnClause): String = {
+    val pats =
+      node.variables.map(_.accept(this)).map(indent).mkString(",\n")
+
+    s"""ReturnClause(
        |  List(
        |$pats
        |  )
@@ -119,6 +131,8 @@ class ASTPrinter extends ASTVisitor[String] {
        |  )
        |)""".stripMargin
   }
+
+
 
   override def visitWhereClause(node: WhereClause): String =
     s"""WhereClause(

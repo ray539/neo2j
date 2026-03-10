@@ -18,6 +18,8 @@ trait NonLeafPlanOperator extends PlanOperator;
 case class AllNodesScan(vname: String, ktx: KernelTransaction)
     extends LeafPlanOperator {
 
+  // this will return a iterator overall the nodes in the database named 'vanme'
+  // - for example [(a: node1), (a: node2), (a: node3) ..]
   override def iterator: Iterator[Map[String, LiteralExpression]] =
     new Iterator[Map[String, LiteralExpression]] {
       var nCursor: NodeCursor = null;
@@ -115,7 +117,9 @@ case class Projection(
 
   override def iterator: Iterator[Map[String, LiteralExpression]] =
     operand
-      .map(row => row.concat(Map((targetVname, expr(row).getLiteralValue(row, ktx)))))
+      .map(row =>
+        row.concat(Map((targetVname, expr(row).getLiteralValue(row, ktx))))
+      )
       .iterator
 }
 
@@ -138,13 +142,13 @@ case class CreateRelationship(
 
     val props: Map[String, LiteralExpression] =
       properties.map((k, v) => (k, v.getLiteralValue(row, ktx)))
-    ktx.writeApi.relationshipCreate(label, props, n1, n2)
+    val newId = ktx.writeApi.relationshipCreate(label, props, n1, n2)
+    row.concat(Map((vname, RelationshipRecord(newId, label, props, n1, n2))))
   }
 
   override def iterator: Iterator[Map[String, LiteralExpression]] = operand
     .map(row => {
       _createRelationship(row)
-      row
     })
     .iterator
 }
@@ -158,15 +162,16 @@ case class CreateNode(
 ) extends NonLeafPlanOperator {
 
   // when iterated over a row, it will create the node using that row and return it
-  override def iterator: Iterator[Map[String, LiteralExpression]] = operand
-    .map(row => {
-      val props = properties.map((k, v) => (k, v.getLiteralValue(row, ktx)))
-      ktx.writeApi.nodeCreate(label, props)
-      // TODO: change row to include a 'vname' column
-      row
-    })
-    .iterator
 
+  def _createNode(row: Map[String, LiteralExpression]) = {
+    val props = properties.map((k, v) => (k, v.getLiteralValue(row, ktx)))
+    val newId = ktx.writeApi.nodeCreate(label, props)
+    row.concat(Map((vname, NodeRecord(newId, label, props))))
+  }
+
+  override def iterator: Iterator[Map[String, LiteralExpression]] = operand
+    .map(row => _createNode(row))
+    .iterator
 }
 
 case class DeleteVariable(
@@ -175,49 +180,50 @@ case class DeleteVariable(
     ktx: KernelTransaction
 ) extends NonLeafPlanOperator {
 
-  override def iterator: Iterator[Map[String, LiteralExpression]] =
-
-    new Iterator[Map[String, LiteralExpression]] {
-      var _it: Iterator[Map[String, LiteralExpression]] = operand.iterator
-      var initialized = false
-
-      def _initialize() = {
-        if !initialized then {
-          // called once when some 'next' is called
-          // - after it creates all the nodes, it just turns into a normal iterato
-          val nodeIdsBuf: mutable.Buffer[Int] = mutable.Buffer()
-          val relIdsBuf: mutable.Buffer[Int] = mutable.Buffer()
-          for row <- operand do {
-            val obj = row(vname)
-            obj match {
-              case n: NodeRecord         => nodeIdsBuf.addOne(n.id)
-              case r: RelationshipRecord => relIdsBuf.addOne(r.id)
-              case _ => throw Exception("unexpected input to delete operator")
-            }
-          }
-          relIdsBuf.foreach(relId => ktx.writeApi.relationshipDelete(relId))
-          nodeIdsBuf.foreach(nodeId => ktx.writeApi.nodeDelete(nodeId))
-          initialized = true
+  def _deleteObj(row: Map[String, LiteralExpression]) = {
+    val obj = row(vname)
+    obj match {
+      case n: NodeRecord         => ktx.writeApi.nodeDelete(n.id)
+      case r: RelationshipRecord => ktx.writeApi.relationshipDelete(r.id)
+      case p: Path               => {
+        val nodeIds = p.relationships.value
+          .flatMap(rel =>
+            List(
+              rel.asInstanceOf[RelationshipRecord].startNode,
+              rel.asInstanceOf[RelationshipRecord].endNode
+            )
+          )
+          .toSet
+        // delete all relationships first, then all nodes
+        val relIds = p.relationships.value.map(rel =>
+          rel.asInstanceOf[RelationshipRecord].id
+        )
+        for relId <- relIds do {
+          ktx.writeApi.relationshipDelete(relId)
+        }
+        for nodeId <- nodeIds do {
+          ktx.writeApi.nodeDelete(nodeId)
         }
       }
-
-      override def hasNext: Boolean = {
-        _it.hasNext
-      }
-
-      override def next(): Map[String, LiteralExpression] = {
-        _initialize()
-        _it.next()
-      }
     }
+    row
+  }
+  override def iterator: Iterator[Map[String, LiteralExpression]] = operand
+    .map(row => _deleteObj(row))
+    .iterator
+}
 
+case class ProduceResults(retVnames: Set[String], operand: PlanOperator) extends NonLeafPlanOperator {
+  override def iterator: Iterator[Map[String, LiteralExpression]] = operand.map(
+    (row) => retVnames.map(vname => (vname, row(vname))).toMap
+  ).iterator
 }
 
 trait BasePlanBuilder(val ktx: KernelTransaction) {
   // val ktx = _ktx
   var boundVars: mutable.Set[String] = mutable.Set()
   var plan: PlanOperator = EmptyRow()
-  
+
   var anonId = 0
   def genAnonVarName = {
     val ret = s"_$$anon$anonId"
@@ -250,7 +256,6 @@ case object PredBuilder {
     return Some(res)
   }
 }
-
 
 trait MatchClauseBuilder extends BasePlanBuilder {
 
@@ -304,13 +309,16 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       // project the right
       boundVars.add(anonVname)
       plan = Projection(
-        anonVname, 
+        anonVname,
         getotherNode,
         plan,
         ktx
       )
       plan = Filter(
-        (row) => row(anonVname).asInstanceOf[NodeRecord].id == row(leftNodeName).asInstanceOf[NodeRecord].id,
+        (row) =>
+          row(anonVname)
+            .asInstanceOf[NodeRecord]
+            .id == row(leftNodeName).asInstanceOf[NodeRecord].id,
         plan,
         ktx
       )
@@ -351,7 +359,11 @@ trait MatchClauseBuilder extends BasePlanBuilder {
 
     // will be None if both pred1, pred2 are None
     val pred = PredBuilder.smartAnd(List(pred1, pred2))
+
     if pred.isDefined then {
+      // println("generated pred: ")
+      // println(pred.get.accept(ASTPrinter()))
+
       plan = Filter(
         predicate = (row) => pred.get.getLiteralValue(row, ktx).isTruthy,
         plan,
@@ -385,11 +397,12 @@ trait MatchClauseBuilder extends BasePlanBuilder {
 
     plan = Projection(
       targetVname = pathVname,
-      expr = (_) => PathConstructorCall(
-        ListConstructorCall(
-          relationshipVnames.toList.map(Variable(_))
-        )
-      ),
+      expr = (_) =>
+        PathConstructorCall(
+          ListConstructorCall(
+            relationshipVnames.toList.map(Variable(_))
+          )
+        ),
       plan,
       ktx
     )
@@ -444,16 +457,15 @@ trait CreateClauseBuilder extends BasePlanBuilder {
 
       // for each incoming row, create a node and do row(vname) = node
       plan = CreateNode(
-          label = if np.label.isEmpty then "" else np.label.get,
-          properties = np.properties,
-          vname = vname,
-          plan,
-          ktx
+        label = if np.label.isEmpty then "" else np.label.get,
+        properties = np.properties,
+        vname = vname,
+        plan,
+        ktx
       )
-      
-      
+
     }
-    
+
   }
 
   def visitCreatePattern(p: Pattern) = {
@@ -472,11 +484,12 @@ trait CreateClauseBuilder extends BasePlanBuilder {
 
     plan = Projection(
       targetVname = colname,
-      expr = (_) => PathConstructorCall(
-        ListConstructorCall(
-          relationshipVnames.toList.map(Variable(_))
-        )
-      ),
+      expr = (_) =>
+        PathConstructorCall(
+          ListConstructorCall(
+            relationshipVnames.toList.map(Variable(_))
+          )
+        ),
       plan,
       ktx
     )
@@ -513,14 +526,34 @@ trait DeleteClauseBuilder extends BasePlanBuilder {
   }
 }
 
-class PlanBuilder(ktx: KernelTransaction) extends CreateClauseBuilder with MatchClauseBuilder with DeleteClauseBuilder with WhereClauseBuilder with BasePlanBuilder(ktx) {
+trait ReturnClauseBuilder extends BasePlanBuilder {
+  def visitReturnClause(returnClause: ReturnClause) = {
+    val varnames = returnClause.variables.map(_.name).toSet
+    for vname <- varnames do {
+      assert(boundVars.contains(vname), s"variable name ${vname} not found")
+    }
+    plan = ProduceResults(
+      varnames,
+      plan
+    )
+  }
+}
+
+class PlanBuilder(ktx: KernelTransaction)
+    extends CreateClauseBuilder
+    with MatchClauseBuilder
+    with DeleteClauseBuilder
+    with WhereClauseBuilder
+    with ReturnClauseBuilder
+    with BasePlanBuilder(ktx) {
 
   def visitClause(clause: Clause) = {
     clause match
-      case c:CreateClause  => visitCreateClause(c)
-      case m:MatchClause  => visitMatchClause(m)
-      case d:DeleteClause => visitDeleteClause(d)
-      case w:WhereClause  => visitWhereClause(w)
+      case c: CreateClause => visitCreateClause(c)
+      case m: MatchClause  => visitMatchClause(m)
+      case d: DeleteClause => visitDeleteClause(d)
+      case w: WhereClause  => visitWhereClause(w)
+      case r: ReturnClause => visitReturnClause(r)
   }
   def getPhysicalPlan(statement: Statement) = {
     val clauses = statement.clauses
@@ -533,9 +566,6 @@ class PlanBuilder(ktx: KernelTransaction) extends CreateClauseBuilder with Match
 
 @main
 def temp() = {
-  // 1 + 2
-  // 1.+(2)
-
   var it1 = List(1, 2, 3).iterator
   var it2 = List(4, 5, 6).iterator
 

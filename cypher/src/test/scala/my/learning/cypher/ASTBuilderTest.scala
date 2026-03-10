@@ -1,10 +1,11 @@
+package my.learning.cypher
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.*;
-import my.learning.generated.*
-import my.learning.generated.Cypher.StatementContext
-import my.learning.cypher.*
-
+import my.learning.cypher.*;
+import my.learning.generated.*;
+import my.learning.generated.Cypher.*;
 
 case object TestHelper {
   def statementFromString(input: String) = {
@@ -33,5 +34,7 @@ class ExampleTest extends AnyFunSuite {
     val x = where.accept(printer)
     println(x)
   }
+
+
 
 }

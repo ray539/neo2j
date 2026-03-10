@@ -131,6 +131,8 @@ case class CreateRelationship(
 ) extends NonLeafPlanOperator {
 
   def _createRelationship(row: Map[String, LiteralExpression]) = {
+    println("_createRelationship")
+    println(row)
     val n1 = row(startColName).asInstanceOf[NodeRecord].id
     val n2 = row(endColName).asInstanceOf[NodeRecord].id
 
@@ -160,6 +162,7 @@ case class CreateNode(
     .map(row => {
       val props = properties.map((k, v) => (k, v.getLiteralValue(row, ktx)))
       ktx.writeApi.nodeCreate(label, props)
+      // TODO: change row to include a 'vname' column
       row
     })
     .iterator
@@ -210,12 +213,11 @@ case class DeleteVariable(
 
 }
 
-trait BasePlanBuilder {
+trait BasePlanBuilder(val ktx: KernelTransaction) {
+  // val ktx = _ktx
   var boundVars: mutable.Set[String] = mutable.Set()
   var plan: PlanOperator = EmptyRow()
-  val store: StorageEngine = StorageEngine()
-  val ktx: KernelTransaction = KernelTransaction(store)
-
+  
   var anonId = 0
   def genAnonVarName = {
     val ret = s"_$$anon$anonId"
@@ -252,8 +254,6 @@ case object PredBuilder {
 
 trait MatchClauseBuilder extends BasePlanBuilder {
 
-
-
   def visitMatchSegment(
       leftNodeName: String,
       segment: (RelationshipPattern, NodePattern)
@@ -273,6 +273,8 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       case _             => RelDir.Both
 
     // expand current rows based on stuff adjacent to 'leftNodeName'
+
+    boundVars.add(rname)
     plan = Expand(
       leftNodeName,
       rname,
@@ -300,6 +302,7 @@ trait MatchClauseBuilder extends BasePlanBuilder {
     if boundVars.contains(np.bindVariable.name) then
       val anonVname = genAnonVarName
       // project the right
+      boundVars.add(anonVname)
       plan = Projection(
         anonVname, 
         getotherNode,
@@ -312,6 +315,7 @@ trait MatchClauseBuilder extends BasePlanBuilder {
         ktx
       )
     else
+      boundVars.add(np.bindVariable.name)
       plan = Projection(
         np.bindVariable.name,
         getotherNode,
@@ -319,7 +323,8 @@ trait MatchClauseBuilder extends BasePlanBuilder {
         ktx
       )
       // do the Cproduct again to populate other field
-      visitMatchNodePattern(np)
+      // visitMatchNodePattern(np)
+      filterBasedOnLabelRelationships(np, np.bindVariable.name)
   }
 
   def filterBasedOnLabelRelationships(
@@ -358,11 +363,11 @@ trait MatchClauseBuilder extends BasePlanBuilder {
   def visitMatchNodePattern(np: NodePattern) = {
     val vname = np.bindVariable.name
     if !boundVars.contains(vname) then {
+      boundVars.add(vname)
       plan = CProduct(
         plan,
         AllNodesScan(vname, ktx)
       )
-      boundVars.add(vname)
     }
     filterBasedOnLabelRelationships(np, vname)
   }
@@ -414,6 +419,8 @@ trait CreateClauseBuilder extends BasePlanBuilder {
 
     // create next node pattern first
     visitCreateNodePattern(np)
+
+    boundVars.add(rname)
     plan = CreateRelationship(
       label = if rp.label.isEmpty then "" else rp.label.get,
       properties = rp.properties,
@@ -427,27 +434,32 @@ trait CreateClauseBuilder extends BasePlanBuilder {
   }
 
   def visitCreateNodePattern(np: NodePattern) = {
-    val colname = np.bindVariable.name
-    if boundVars.contains(colname) then {
+    println("visitCreateNodePattern")
+    val vname = np.bindVariable.name
+    if boundVars.contains(vname) then {
       assert(np.label.isEmpty && np.properties.isEmpty)
       // do nothing
     } else {
-      // create the nodes and also cartesian product with the result (if we return it)
-      plan = CProduct(
-        plan,
-        CreateNode(
+      boundVars.add(vname)
+
+      // for each incoming row, create a node and do row(vname) = node
+      plan = CreateNode(
           label = if np.label.isEmpty then "" else np.label.get,
           properties = np.properties,
-          vname = colname,
+          vname = vname,
           plan,
           ktx
-        )
       )
+      
+      
     }
+    
   }
 
   def visitCreatePattern(p: Pattern) = {
+    println("visitCreatePattern")
     val colname = p.bindVariable.name
+
     visitCreateNodePattern(p.firstNode)
     var bname = p.firstNode.bindVariable.name
 
@@ -471,6 +483,7 @@ trait CreateClauseBuilder extends BasePlanBuilder {
   }
 
   def visitCreateClause(createClause: CreateClause) = {
+    println("visitCreateClause")
     val patterns = createClause.patterns
     for p <- patterns do {
       visitCreatePattern(p)
@@ -500,7 +513,8 @@ trait DeleteClauseBuilder extends BasePlanBuilder {
   }
 }
 
-class PlanBuilder() extends CreateClauseBuilder with MatchClauseBuilder with DeleteClauseBuilder with WhereClauseBuilder {
+class PlanBuilder(ktx: KernelTransaction) extends CreateClauseBuilder with MatchClauseBuilder with DeleteClauseBuilder with WhereClauseBuilder with BasePlanBuilder(ktx) {
+
   def visitClause(clause: Clause) = {
     clause match
       case c:CreateClause  => visitCreateClause(c)
@@ -508,7 +522,6 @@ class PlanBuilder() extends CreateClauseBuilder with MatchClauseBuilder with Del
       case d:DeleteClause => visitDeleteClause(d)
       case w:WhereClause  => visitWhereClause(w)
   }
-
   def getPhysicalPlan(statement: Statement) = {
     val clauses = statement.clauses
     for clause <- clauses do {
@@ -517,7 +530,6 @@ class PlanBuilder() extends CreateClauseBuilder with MatchClauseBuilder with Del
     plan
   }
 }
-
 
 @main
 def temp() = {

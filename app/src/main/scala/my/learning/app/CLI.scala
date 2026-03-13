@@ -3,6 +3,17 @@ import scala.io.StdIn.readLine
 import org.scalatest.tools.PrettyPrinter
 import my.learning.app.CLIPrinter
 
+object ANSI {
+  val RESET = "\u001b[0m"
+
+  val RED = "\u001b[31m"
+  val GREEN = "\u001b[32m"
+  val YELLOW = "\u001b[33m"
+  val BLUE = "\u001b[34m"
+  val CYAN = "\u001b[36m"
+  val BOLD = "\u001b[1m"
+}
+
 def centerPad(s: String, totalWidth: Int, padChar: Char): String = {
   val currentLength = s.length
   if (currentLength >= totalWidth) {
@@ -25,24 +36,24 @@ def CLI(): Unit = {
   val app = CypherRuntime()
 
   println()
-  println("====================================")
-  println("      neo2j Command Line")
-  println("====================================")
+  println(ANSI.CYAN + "====================================" + ANSI.RESET)
+  println(ANSI.BOLD + "      neo2j Command Line" + ANSI.RESET)
+  println(ANSI.CYAN + "====================================" + ANSI.RESET)
   println("Type a Cypher query and press Enter.")
   println("Type 'exit' or 'quit' to leave.")
   println()
 
   while true do
-    print("neo2j> ")
+    print(ANSI.GREEN + "neo2j> " + ANSI.RESET)
     val input = readLine()
 
     if input == null then
-      println("goodbye")
+      println(ANSI.YELLOW + "Goodbye." + ANSI.RESET)
       return
 
     input.trim().toLowerCase() match
       case "quit" | "exit" => {
-        println("goodbye")
+        println(ANSI.YELLOW + "Goodbye." + ANSI.RESET)
         return
       }
       case _ => {}
@@ -51,14 +62,9 @@ def CLI(): Unit = {
       val res = app.executeQuery(input)
       val numRows = res.size
       println()
-      if numRows == 0 then
-        println(
-          "no rows"
-        )
+      if numRows == 0 then println(ANSI.YELLOW + "no rows" + ANSI.RESET)
       else if res(0).size == 0 then
-        println(
-          "no columns"
-        )
+        println(ANSI.YELLOW + "no columns" + ANSI.RESET)
       else
         val cols = res(0).keySet.toList
 
@@ -103,9 +109,10 @@ def CLI(): Unit = {
     catch
       case e: Throwable => {
         println()
-        println("Error:")
-        println(e.getMessage)
+        println(ANSI.RED + "Error:" + ANSI.RESET)
+        println(ANSI.RED + e.getMessage + ANSI.RESET)
         println()
+
       }
 
 }

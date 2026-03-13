@@ -6,11 +6,12 @@ Neo2j is a toy clone of Neo4j, a popular graph database. It supports an essentia
 ### Run instructions
 - make sure you are in the project root directory `neo2j`
 - make sure you have a stable version of maven (version `3.9+`)
+
 Build the application
 ```
 mvn clean install
 ```
-The CLI app is in the `app` folder, so run the commands
+The CLI app is in the `app` folder, so run the command
 ```
 mvn  exec:java -Dexec.mainClass="CLI" -pl app
 ```

@@ -22,8 +22,8 @@ object PlanPrinter {
       case EmptyRow() =>
         s"${pad}EmptyRow\n"
 
-      case Filter(_, operand, _) =>
-        s"${pad}Filter\n" +
+      case Filter(_, operand, _, details) =>
+        s"${pad}Filter(${details})\n" +
         visit(operand, level + 1)
 
       case CProduct(left, right) =>
@@ -49,6 +49,10 @@ object PlanPrinter {
 
       case DeleteVariable(vname, operand, _) =>
         s"${pad}DeleteVariable($vname)\n" +
+        visit(operand, level + 1)
+      
+      case ProduceResults(retVnames, operand) => 
+        s"${pad}ProduceResults(${retVnames})\n" +
         visit(operand, level + 1)
     }
   }

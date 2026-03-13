@@ -65,7 +65,7 @@ case class DeleteClause(variables: List[Variable]) extends Clause {
   override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitDeleteClause(this)
 }
 
-case class ReturnClause(variables: List[Variable]) extends Clause {
+case class ReturnClause(expressions: List[Expression]) extends Clause {
   override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitReturnClause(this)
 
 }
@@ -77,7 +77,8 @@ case class WhereClause(expr: Expression) extends Clause {
 // expressions
 //  (1 + 2) / 3 + a + TRUE / FALSE
 // - just make it a tree
-sealed trait Expression extends ASTNode {
+sealed trait Expression(originalText: String = "<expression>") extends ASTNode {
+  def getOriginalText() = originalText
 
   def getLiteralValue(
       varValues: Map[String, LiteralExpression],
@@ -88,7 +89,8 @@ sealed trait Expression extends ASTNode {
     BinaryExpression(
       this,
       Add,
-      that
+      that,
+      originalText
     )
   }
 
@@ -96,7 +98,8 @@ sealed trait Expression extends ASTNode {
     BinaryExpression(
       this,
       Sub,
-      that
+      that,
+      originalText
     )
   }
 
@@ -104,14 +107,16 @@ sealed trait Expression extends ASTNode {
     BinaryExpression(
       this,
       Mul,
-      that
+      that,
+      originalText
     )
   }
   def /(that: Expression): Expression = {
     BinaryExpression(
       this,
       Div,
-      that
+      that,
+      originalText
     )
   }
 
@@ -119,7 +124,8 @@ sealed trait Expression extends ASTNode {
     BinaryExpression(
       this,
       And,
-      that
+      that,
+      originalText
     )
   }
 
@@ -127,14 +133,16 @@ sealed trait Expression extends ASTNode {
     BinaryExpression(
       this,
       Or,
-      that
+      that,
+      originalText
     )
   }
 
   def !(): Expression = {
     UnaryExpression(
       Sub,
-      this
+      this,
+      originalText
     )
   }
 
@@ -142,7 +150,8 @@ sealed trait Expression extends ASTNode {
     BinaryExpression(
       this,
       GetAttr,
-      that
+      that,
+      originalText
     )
   }
 
@@ -150,35 +159,40 @@ sealed trait Expression extends ASTNode {
     BinaryExpression(
       this,
       GetAttr,
-      StringLiteral(that)
+      StringLiteral(that),
+      originalText
     )
   }
 
   def getLabel(): Expression = {
     UnaryExpression(
       GetLabel,
-      this
+      this,
+      originalText
     )
   }
 
   def getProperties(): Expression = {
     UnaryExpression(
       GetProperties,
-      this
+      this,
+      originalText
     )
   }
 
   def getStartNode(): Expression = {
     UnaryExpression(
       GetStartNode,
-      this
+      this,
+      originalText
     )
   }
 
   def getEndNode(): Expression = {
     UnaryExpression(
       GetEndNode,
-      this
+      this,
+      originalText
     )
   }
 
@@ -186,7 +200,8 @@ sealed trait Expression extends ASTNode {
     BinaryExpression(
       this,
       IdEq,
-      that
+      that,
+      originalText
     )
   }
 
@@ -194,14 +209,16 @@ sealed trait Expression extends ASTNode {
     BinaryExpression(
       this,
       Eq,
-      that
+      that,
+      originalText
     )
   }
   def exprEq(that: String): Expression = {
     BinaryExpression(
       this,
       Eq,
-      StringLiteral(that)
+      StringLiteral(that),
+      originalText
     )
   }
 }
@@ -226,7 +243,7 @@ case object Or extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
       case (BoolLiteral(b1), BoolLiteral(b2)) => BoolLiteral(b1 || b2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Or: $lval $rval")
   }
 }
 
@@ -248,28 +265,28 @@ case object Le extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2)) => BoolLiteral(x1 <= x2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Le: $lval $rval")
   }
 }
 case object Ge extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2)) => BoolLiteral(x1 >= x2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Ge: $lval $rval")
   }
 }
 case object Lt extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2)) => BoolLiteral(x1 < x2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Lt: $lval $rval")
   }
 }
 case object Gt extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2)) => BoolLiteral(x1 > x2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Gt: $lval $rval")
   }
 }
 case object Add extends Operator {
@@ -277,13 +294,13 @@ case object Add extends Operator {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2))       => IntLiteral(x1 + x2)
       case (StringLiteral(s1), StringLiteral(s2)) => StringLiteral(s1 + s2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Add: $lval $rval")
   }
 
   override def unOp(operand: LiteralExpression): LiteralExpression = {
     operand match
       case IntLiteral(x1) => IntLiteral(x1) 
-      case _ => throw Exception(s"invalid operands to And: $operand")
+      case _ => throw Exception(s"invalid operands to Add: $operand")
   }
 }
 
@@ -291,34 +308,34 @@ case object Sub extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2)) => IntLiteral(x1 - x2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Sub: $lval $rval")
   }
 
   override def unOp(operand: LiteralExpression): LiteralExpression = {
     operand match
       case IntLiteral(x1) => IntLiteral(-x1) 
-      case _ => throw Exception(s"invalid operands to And: $operand")
+      case _ => throw Exception(s"invalid operands to Sub: $operand")
   }
 }
 case object Mul extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2)) => IntLiteral(x1 * x2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Mul: $lval $rval")
   }
 }
 case object Div extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2)) => IntLiteral(x1 / x2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Div: $lval $rval")
   }
 }
 case object Mod extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2)) => IntLiteral(x1 % x2)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Mod: $lval $rval")
   }
 }
 case object Pow extends Operator {
@@ -326,14 +343,15 @@ case object Pow extends Operator {
     (lval, rval) match
       case (IntLiteral(x1), IntLiteral(x2)) =>
         IntLiteral(Math.pow(x1, x2).toInt)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to Pow: $lval $rval")
   }
+
 }
 case object Not extends Operator {
   override def unOp(operand: LiteralExpression): LiteralExpression = {
     operand match
       case BoolLiteral(b) => BoolLiteral(!b)
-      case _ => throw Exception(s"invalid operands to And: $operand")
+      case _ => throw Exception(s"invalid operands to Not: $operand")
   }
 }
 case object IdEq extends Operator {
@@ -342,7 +360,7 @@ case object IdEq extends Operator {
       case (v1: NodeRecord, v2: NodeRecord) => BoolLiteral(v1.id == v2.id)
       case (v1: RelationshipRecord, v2: RelationshipRecord) =>
         BoolLiteral(v1.id == v2.id)
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case _ => throw Exception(s"invalid operands to IdEq: $lval $rval")
   }
 }
 
@@ -354,7 +372,17 @@ case object GetAttr extends Operator {
           key,
           throw new RuntimeException(s"Key '$key' not found in map")
         )
-      case _ => throw Exception(s"invalid operands to And: $lval $rval")
+      case (NodeRecord(_, _, propreties), StringLiteral(key)) =>
+        propreties.getOrElse(
+          key,
+          throw new RuntimeException(s"Key '$key' not found in map")
+        )
+      case (RelationshipRecord(_, _, propreties, _, _), StringLiteral(key)) =>
+        propreties.getOrElse(
+          key,
+          throw new RuntimeException(s"Key '$key' not found in map")
+        )
+      case _ => throw Exception(s"invalid operands to GetAttr: $lval $rval")
   }
 }
 case object Index extends Operator
@@ -379,8 +407,9 @@ case object GetEndNode extends Operator
 case class BinaryExpression(
     left: Expression,
     operator: Operator,
-    right: Expression
-) extends Expression {
+    right: Expression,
+    originalText: String
+) extends Expression(originalText) {
 
   override def getLiteralValue(
       varValues: Map[String, LiteralExpression],
@@ -392,14 +421,13 @@ case class BinaryExpression(
   }
 
   override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitBinaryExpression(this)
-
 }
 
 // case object Not extends UnaryOperator
 // case object Plus extends UnaryOperator
 // case object Neg extends UnaryOperator
-case class UnaryExpression(operator: Operator, operand: Expression)
-    extends Expression {
+case class UnaryExpression(operator: Operator, operand: Expression, originalText: String)
+    extends Expression(originalText) {
   override def getLiteralValue(
       varValues: Map[String, LiteralExpression],
       ktx: KernelTransaction
@@ -412,7 +440,7 @@ case class UnaryExpression(operator: Operator, operand: Expression)
 
 }
 
-case class Variable(name: String) extends Expression {
+case class Variable(name: String) extends Expression(name) {
 
   override def getLiteralValue(
       varValues: Map[String, LiteralExpression],
@@ -429,7 +457,7 @@ trait LiteralExpression extends Expression {
   override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitLiteralExpression(this)
 }
 
-case class IntLiteral(value: Int) extends LiteralExpression {
+case class IntLiteral(value: Int) extends LiteralExpression with Expression(value.toString()) {
   override def isTruthy: Boolean = (value != 0)
   override def getLiteralValue(
       varValues: Map[String, LiteralExpression],
@@ -439,7 +467,7 @@ case class IntLiteral(value: Int) extends LiteralExpression {
   }
 }
 
-case class NodeId(id: Int) extends LiteralExpression {
+case class NodeId(id: Int) extends LiteralExpression with Expression {
   override def isTruthy: Boolean = true
   override def getLiteralValue(
       varValues: Map[String, LiteralExpression],
@@ -447,7 +475,7 @@ case class NodeId(id: Int) extends LiteralExpression {
   ): LiteralExpression = this
 }
 
-case class RelId(id: Int) extends LiteralExpression {
+case class RelId(id: Int) extends LiteralExpression with Expression {
   override def isTruthy: Boolean = true
   override def getLiteralValue(
       varValues: Map[String, LiteralExpression],
@@ -455,7 +483,7 @@ case class RelId(id: Int) extends LiteralExpression {
   ): LiteralExpression = this
 }
 
-case class StringLiteral(value: String) extends LiteralExpression {
+case class StringLiteral(value: String) extends LiteralExpression with Expression(s"\"$value\"") {
 
   override def isTruthy: Boolean = value.size != 0
   override def getLiteralValue(
@@ -467,7 +495,7 @@ case class StringLiteral(value: String) extends LiteralExpression {
 
 }
 
-case class BoolLiteral(value: Boolean) extends LiteralExpression {
+case class BoolLiteral(value: Boolean) extends LiteralExpression with Expression(value.toString()) {
 
   override def isTruthy: Boolean = value
 
@@ -480,7 +508,7 @@ case class BoolLiteral(value: Boolean) extends LiteralExpression {
 }
 
 case class MapLiteral(value: Map[String, LiteralExpression])
-    extends LiteralExpression {
+    extends LiteralExpression with Expression {
 
   override def isTruthy: Boolean = value.size > 0
 
@@ -494,7 +522,7 @@ case class MapLiteral(value: Map[String, LiteralExpression])
 
 // Seq is a trait which covers List, .. and bunch of others
 case class ListLiteral(value: List[LiteralExpression])
-    extends LiteralExpression {
+    extends LiteralExpression with Expression {
 
   override def isTruthy: Boolean = value.size > 0
 
@@ -519,11 +547,12 @@ case class ListConstructorCall(values: Seq[Expression]) extends Expression {
   override def accept[T](visitor: ASTVisitor[T]): T = visitor.visitListConstructorCall(this)
 }
 
+
 case class NodeRecord(
     id: Int,
     label: String,
-    properties: Map[String, LiteralExpression]
-) extends LiteralExpression {
+    properties: Map[String, LiteralExpression],
+) extends LiteralExpression with Expression {
 
   override def isTruthy: Boolean = true
 
@@ -540,8 +569,8 @@ case class RelationshipRecord(
     label: String,
     properties: Map[String, LiteralExpression],
     startNode: Int,
-    endNode: Int
-) extends LiteralExpression {
+    endNode: Int,
+) extends LiteralExpression with Expression {
 
   override def isTruthy: Boolean = true
 
@@ -554,7 +583,7 @@ case class RelationshipRecord(
 }
 
 // should be 'list of relationships'
-case class Path(relationships: ListLiteral) extends LiteralExpression {
+case class Path(relationships: ListLiteral) extends LiteralExpression with Expression {
 
   override def isTruthy: Boolean = true
 

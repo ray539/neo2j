@@ -65,7 +65,7 @@ class ASTPrinter extends ASTVisitor[String] {
 
   override def visitReturnClause(node: ReturnClause): String = {
     val pats =
-      node.variables.map(_.accept(this)).map(indent).mkString(",\n")
+      node.expressions.map(_.accept(this)).map(indent).mkString(",\n")
 
     s"""ReturnClause(
        |  List(
@@ -141,6 +141,7 @@ class ASTPrinter extends ASTVisitor[String] {
 
   override def visitBinaryExpression(node: BinaryExpression): String =
     s"""BinaryExpression(
+       |${node.originalText},
        |${indent(node.left.accept(this))},
        |  ${node.operator},
        |${indent(node.right.accept(this))}

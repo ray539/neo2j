@@ -47,6 +47,7 @@ import my.learning.generated.Cypher.IndexContext
 import java.util.function.BinaryOperator
 import scala.collection.mutable
 import my.learning.generated.Cypher.ReturnClauseContext
+import my.learning.cypher.ASTParser.parseAST
 
 // trait because we want class which can extend this to inherit the functionality
 // (this is the 'mixin' pattern)
@@ -91,7 +92,8 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
 
   override def visitReturnClause(ctx: ReturnClauseContext): ReturnClause =
     val vars =
-      (for varctx <- ctx.variable().asScala yield visitVariable(varctx)).toList
+      (for exprCtx <- ctx.expression().asScala
+      yield visitExpression(exprCtx)).toList
     return ReturnClause(vars)
 
   override def visitWhereClause(ctx: WhereClauseContext): WhereClause =
@@ -151,7 +153,6 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
   override def visitVariable(ctx: VariableContext): Variable =
     return Variable(ctx.ID().getText())
 
-  // probably make this a map sometime
   override def visitLabelExpression(ctx: LabelExpressionContext): String =
     return ctx.ID().getText()
 
@@ -169,13 +170,18 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
 
   override def visitExpression(ctx: ExpressionContext): Expression =
     val exprs = ctx.expression11()
+
+    // println(tokens.getText(ctx))
+
+    // println(ctx.getText())
+
     var res = visitExpression11(exprs.get(0))
     for idx <- (1 until exprs.size()) do {
       val right = visitExpression11(exprs.get(idx))
       val opToken = ctx.getChild(2 * idx - 1).getText()
       val operator = opToken match
         case "OR" => Or
-      res = BinaryExpression(res, operator, right)
+      res = BinaryExpression(res, operator, right, ctx.getText())
     }
     return res
 
@@ -187,14 +193,14 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
       val opToken = ctx.getChild(2 * idx - 1).getText()
       val operator = opToken match
         case "AND" => And
-      res = BinaryExpression(res, operator, right)
+      res = BinaryExpression(res, operator, right, ctx.getText())
     }
     return res
 
   override def visitExpression9(ctx: Expression9Context): Expression =
     var yes = ctx.NOT().size() % 2 == 0
     val expr8 = visitExpression8(ctx.expression8())
-    return if yes then expr8 else UnaryExpression(Not, expr8)
+    return if yes then expr8 else UnaryExpression(Not, expr8, ctx.getText())
 
   override def visitExpression8(ctx: Expression8Context): Expression =
     val exprs = ctx.expression6()
@@ -209,7 +215,7 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
         case ">=" => Ge
         case "<"  => Lt
         case ">"  => Gt
-      res = BinaryExpression(res, operator, right)
+      res = BinaryExpression(res, operator, right, ctx.getText())
     }
     return res
 
@@ -222,7 +228,7 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
       val operator = opToken match
         case "+" => Add
         case "-" => Sub
-      res = BinaryExpression(res, operator, right)
+      res = BinaryExpression(res, operator, right, ctx.getText())
     }
     return res
 
@@ -236,7 +242,7 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
         case "*" => Mul
         case "/" => Div
         case "%" => Mod
-      res = BinaryExpression(res, operator, right)
+      res = BinaryExpression(res, operator, right, ctx.getText())
     }
     return res
 
@@ -248,15 +254,15 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
       val opToken = ctx.getChild(2 * idx - 1).getText()
       val operator = opToken match
         case "^" => Pow
-      res = BinaryExpression(left, operator, res)
+      res = BinaryExpression(left, operator, res, ctx.getText())
     }
     return res
 
   override def visitExpression3(ctx: Expression3Context): Expression =
     if ctx.ADD() != null then
-      return UnaryExpression(Add, visitExpression2(ctx.expression2()))
+      return UnaryExpression(Add, visitExpression2(ctx.expression2()), ctx.getText())
     if ctx.SUB() != null then
-      return UnaryExpression(Sub, visitExpression2(ctx.expression2()))
+      return UnaryExpression(Sub, visitExpression2(ctx.expression2()), ctx.getText())
     return visitExpression2(ctx.expression2())
 
   override def visitExpression2(ctx: Expression2Context): Expression =
@@ -265,8 +271,9 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
     for postOp <- postFixes.asScala do {
       var tmp = visitPostFix(postOp)
       assert(tmp.left == null)
-      base = tmp.copy(left = base)
+      base = tmp.copy(left = base, originalText = ctx.getText())
     }
+
     return base
 
   override def visitPostFix(ctx: PostFixContext): BinaryExpression =
@@ -279,11 +286,12 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
     return BinaryExpression(
       null,
       GetAttr,
-      StringLiteral(ctx.ID().getText())
+      StringLiteral(ctx.ID().getText()),
+      ctx.getText()
     )
 
   override def visitIndex(ctx: IndexContext): BinaryExpression =
-    return BinaryExpression(null, Index, visitExpression(ctx.expression()))
+    return BinaryExpression(null, Index, visitExpression(ctx.expression()), ctx.getText())
 
   override def visitExpression1(ctx: Expression1Context): Expression =
     if ctx.literal() != null then return visitLiteral(ctx.literal())
@@ -299,7 +307,9 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
 
   override def visitLiteral(ctx: LiteralContext): Expression =
     if ctx.STRING_LITERAL() != null then
-      return StringLiteral(ctx.STRING_LITERAL().getText())
+      val strText = ctx.STRING_LITERAL().getText()
+      assert(strText.size >= 2, "something wrong with antlr")
+      return StringLiteral(strText.substring(1, strText.size - 1))
     else if ctx.INTEGER_LITERAL() != null then
       return IntLiteral(ctx.INTEGER_LITERAL().getText().toInt)
     else if ctx.TRUE() != null then
@@ -354,18 +364,5 @@ object ASTParser {
 def main() =
 
   val text =
-    "RETURN a, b, c" // "CREATE ({x: 0})" // "CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)"
-  val input: CharStream =
-    CharStreams.fromString(text)
-  val lexer: CypherLexer = CypherLexer(input)
-  val tokens: CommonTokenStream = CommonTokenStream(lexer)
-
-  val parser: Cypher = Cypher(tokens)
-  val tree: ParseTree = parser.statement();
-  // val sb = StatementBuilder()
-  // val ast = sb.visitStatement(tree.asInstanceOf[StatementContext])
-
-  println(
-    tree.toStringTree(parser)
-  ) // enrich with parser to get further information
-  Trees.inspect(tree, parser)
+    "RETURN (1+2)*3 + 4" // "CREATE ({x: 0})" // "CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)"
+  parseAST(text)

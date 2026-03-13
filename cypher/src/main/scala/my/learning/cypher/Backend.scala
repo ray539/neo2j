@@ -22,7 +22,7 @@ class StorageEngine {
   private var nextId = 0;
 
   def createNode(node: NodeRecord) = {
-    println(s"se.createNode ${node}")
+    // println(s"se.createNode ${node}")
     idToNodeRecord(node.id) = node
     nodeToOutgoing(node.id) = mutable.Set()
     nodeToIncoming(node.id) = mutable.Set()
@@ -143,7 +143,7 @@ class TxState(store: StorageEngine) {
 
 
   def markNodeDeleted(nodeId: Int) = {
-    println(s"tx.markNodeDeleted ${nodeId}")
+    // println(s"tx.markNodeDeleted ${nodeId}")
     if getEffectiveDegree(nodeId) > 0 then {
       throw Exception("runtime error: can't delete node with relationships")
     }
@@ -159,7 +159,7 @@ class TxState(store: StorageEngine) {
 
   def createNode(label: String, props: Map[String, LiteralExpression]) = {
     val newId = store.getNextId
-    println(s"tx.createNode ${newId}")
+    // (s"tx.createNode ${newId}")
 
     val nodeRecord = NodeRecord(newId, label, props)
     _createNode(nodeRecord)
@@ -203,7 +203,7 @@ class TxState(store: StorageEngine) {
   }
 
   def createRel(label: String, props: Map[String, LiteralExpression], startNode: Int, endNode: Int) = {
-    println(s"tx.createRel ${startNode} ${endNode}")
+    // println(s"tx.createRel ${startNode} ${endNode}")
     val newId = store.getNextId
     val rel = RelationshipRecord(newId, label, props, startNode, endNode)
     

@@ -22,7 +22,7 @@ deleteClause: DELETE variable (COMMA variable)*;
 
 whereClause: WHERE expression;
 
-returnClause: RETURN variable (COMMA variable)*;
+returnClause: RETURN expression (COMMA expression)*;
 
 patternList: pattern (COMMA pattern)*;
 pattern: (variable EQ)? patternElement;

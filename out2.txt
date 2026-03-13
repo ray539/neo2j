@@ -1,46 +1,17 @@
-Statement(
-  List(
-    CreateClause(
-      List(
-        Pattern(
-          Variable(_$generated0),
-          NodePattern(
-            Variable(a),
-            Some(A),
-            Map()
-          ),
-          List(
-            (
-              RelationshipPattern(
-                Variable(r1),
-                None,
-                Map(),
-                false,
-                true
-              ),
-              NodePattern(
-                Variable(b),
-                Some(A),
-                Map()
-              )
-            ), 
-            (
-              RelationshipPattern(
-                Variable(r2),
-                None,
-                Map(),
-                false,
-                true
-              ),
-              NodePattern(
-                Variable(c),
-                Some(A),
-                Map()
-              )
-            )
-          )
-        )
-      )
-    )
-  )
-)
+"MATCH (n1{x:1}) MATCH(n2 {x:2}) MATCH (n1) - [r] -> (n2) RETURN r"
+
+ProduceResults(Set(r))
+  Projection(target=r)
+    Projection(target=_$generated2)
+      Filter(row(_$anon0).asInstanceOf[NodeRecord].id == row(n2).asInstanceOf[NodeRecord].id)
+        Projection(target=_$anon0)
+          Expand(node=n1 rel=r dir=Forward)
+            Projection(target=_$generated1)
+              Filter(BinaryExpression(BinaryExpression(UnaryExpression(GetProperties,Variable(n2),n2),GetAttr,StringLiteral(x),n2),Eq,IntLiteral(2),n2))
+                CProduct
+                  Projection(target=_$generated0)
+                    Filter(BinaryExpression(BinaryExpression(UnaryExpression(GetProperties,Variable(n1),n1),GetAttr,StringLiteral(x),n1),Eq,IntLiteral(1),n1))
+                      CProduct
+                        EmptyRow
+                        AllNodesScan(n1)
+                  AllNodesScan(n2)

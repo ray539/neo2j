@@ -57,6 +57,21 @@ class ExampleTest extends AnyFunSuite {
     println(x)
   }
 
+  test("named create") {
+    val input = TestHelper.statementFromString("CREATE(n:A{x:1}) RETURN n")
+    val printer = ASTPrinter()
+    val x = input.accept(printer)
+    println(x)
+  }
+
+  test("return expression") {
+    val input = TestHelper.statementFromString("CREATE(n:A{x:1}) RETURN n.x")
+    val printer = ASTPrinter()
+    val x = input.accept(printer)
+    println(x)
+  }
+
+
 
 
 }

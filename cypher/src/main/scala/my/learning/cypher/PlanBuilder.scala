@@ -60,7 +60,8 @@ case class EmptyRow() extends LeafPlanOperator {
 case class Filter(
     predicate: (Map[String, LiteralExpression]) => Boolean,
     operand: PlanOperator,
-    ktx: KernelTransaction
+    ktx: KernelTransaction,
+    details: String = ""
 ) extends NonLeafPlanOperator {
   override def iterator: Iterator[Map[String, LiteralExpression]] =
     operand.filter(row => predicate(row)).iterator
@@ -135,15 +136,24 @@ case class CreateRelationship(
 ) extends NonLeafPlanOperator {
 
   def _createRelationship(row: Map[String, LiteralExpression]) = {
-    println("_createRelationship")
-    println(row)
+    // println("_createRelationship")
+    // println(row)
     val n1 = row(startColName).asInstanceOf[NodeRecord].id
     val n2 = row(endColName).asInstanceOf[NodeRecord].id
 
     val props: Map[String, LiteralExpression] =
       properties.map((k, v) => (k, v.getLiteralValue(row, ktx)))
-    val newId = ktx.writeApi.relationshipCreate(label, props, n1, n2)
-    row.concat(Map((vname, RelationshipRecord(newId, label, props, n1, n2))))
+
+    direction match
+      case RelDir.Forward => {
+        val newId = ktx.writeApi.relationshipCreate(label, props, n1, n2)
+        row.concat(Map((vname, RelationshipRecord(newId, label, props, n1, n2))))
+      }
+      case RelDir.Backward => {
+        val newId = ktx.writeApi.relationshipCreate(label, props, n2, n1)
+        row.concat(Map((vname, RelationshipRecord(newId, label, props, n2, n1))))
+      }
+      case RelDir.Both => throw Exception("can't create relationship with direction both")
   }
 
   override def iterator: Iterator[Map[String, LiteralExpression]] = operand
@@ -263,7 +273,7 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       leftNodeName: String,
       segment: (RelationshipPattern, NodePattern)
   ): Unit = {
-    assert(boundVars.contains(leftNodeName))
+    assert(boundVars.contains(leftNodeName), "matchClauseBuilder: internal error")
     val (rp, np) = segment
     val rname = rp.bindVariable.name
     // if relationship variable is already bound, entire query returns nothing
@@ -287,8 +297,6 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       plan,
       ktx
     )
-    // filter so that it isn't the same as any other visited relationship
-    // - in the current line
 
     filterBasedOnLabelRelationships(rp, rname)
 
@@ -318,9 +326,10 @@ trait MatchClauseBuilder extends BasePlanBuilder {
         (row) =>
           row(anonVname)
             .asInstanceOf[NodeRecord]
-            .id == row(leftNodeName).asInstanceOf[NodeRecord].id,
+            .id == row(np.bindVariable.name).asInstanceOf[NodeRecord].id,
         plan,
-        ktx
+        ktx,
+        s"row(${anonVname}).asInstanceOf[NodeRecord].id == row(${np.bindVariable.name}).asInstanceOf[NodeRecord].id"
       )
     else
       boundVars.add(np.bindVariable.name)
@@ -367,7 +376,8 @@ trait MatchClauseBuilder extends BasePlanBuilder {
       plan = Filter(
         predicate = (row) => pred.get.getLiteralValue(row, ktx).isTruthy,
         plan,
-        ktx
+        ktx,
+        pred.get.toString()
       )
     }
   }
@@ -419,14 +429,14 @@ trait CreateClauseBuilder extends BasePlanBuilder {
       leftNodeName: String,
       segment: (RelationshipPattern, NodePattern)
   ): Unit = {
-    assert(boundVars.contains(leftNodeName))
+    assert(boundVars.contains(leftNodeName), "createClauseBuilder:internal error")
     val (rp, np) = segment
     val rname = rp.bindVariable.name
-    assert(!boundVars.contains(rname))
+    assert(!boundVars.contains(rname), s"variable ${rname} already used")
     val dir = (rp.leftArrow, rp.rightArrow) match
       case (true, false) => RelDir.Backward
       case (false, true) => RelDir.Forward
-      case _             => RelDir.Both
+      case _             => throw Exception("can't create bidirectional relationship")
 
     val rightNodeName = np.bindVariable.name
 
@@ -447,10 +457,10 @@ trait CreateClauseBuilder extends BasePlanBuilder {
   }
 
   def visitCreateNodePattern(np: NodePattern) = {
-    println("visitCreateNodePattern")
+    // println("visitCreateNodePattern")
     val vname = np.bindVariable.name
     if boundVars.contains(vname) then {
-      assert(np.label.isEmpty && np.properties.isEmpty)
+      assert(np.label.isEmpty && np.properties.isEmpty, s"variable ${vname} already used and can't be changed")
       // do nothing
     } else {
       boundVars.add(vname)
@@ -463,13 +473,11 @@ trait CreateClauseBuilder extends BasePlanBuilder {
         plan,
         ktx
       )
-
     }
-
   }
 
   def visitCreatePattern(p: Pattern) = {
-    println("visitCreatePattern")
+    // println("visitCreatePattern")
     val colname = p.bindVariable.name
 
     visitCreateNodePattern(p.firstNode)
@@ -496,7 +504,7 @@ trait CreateClauseBuilder extends BasePlanBuilder {
   }
 
   def visitCreateClause(createClause: CreateClause) = {
-    println("visitCreateClause")
+    // println("visitCreateClause")
     val patterns = createClause.patterns
     for p <- patterns do {
       visitCreatePattern(p)
@@ -511,7 +519,8 @@ trait WhereClauseBuilder extends BasePlanBuilder {
     plan = Filter(
       predicate = (row) => expr.getLiteralValue(row, ktx).isTruthy,
       plan,
-      ktx
+      ktx,
+      expr.toString()
     )
   }
 }
@@ -528,14 +537,22 @@ trait DeleteClauseBuilder extends BasePlanBuilder {
 
 trait ReturnClauseBuilder extends BasePlanBuilder {
   def visitReturnClause(returnClause: ReturnClause) = {
-    val varnames = returnClause.variables.map(_.name).toSet
-    for vname <- varnames do {
-      assert(boundVars.contains(vname), s"variable name ${vname} not found")
+    // val expressions = returnClause.expressions.map(_.name).toSet
+    for expr <- returnClause.expressions do {
+      // project it
+      plan = Projection(
+        expr.getOriginalText(),
+        (row) => expr.getLiteralValue(row, ktx),
+        plan,
+        ktx
+      )
     }
+
     plan = ProduceResults(
-      varnames,
+      returnClause.expressions.map((v) => v.getOriginalText()).toSet,
       plan
     )
+
   }
 }
 
@@ -560,6 +577,16 @@ class PlanBuilder(ktx: KernelTransaction)
     for clause <- clauses do {
       visitClause(clause)
     }
+
+    // if last is not an return, answer is empty row
+    clauses.last match
+      case r: ReturnClause => {}
+      case _ => {
+        plan = CProduct(
+          plan,
+          EmptyResult()
+        )
+      }
     plan
   }
 }

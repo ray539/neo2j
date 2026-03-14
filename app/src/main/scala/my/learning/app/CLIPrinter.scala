@@ -6,6 +6,7 @@ import my.learning.cypher.IntLiteral
 import my.learning.cypher.StringLiteral
 import my.learning.cypher.BoolLiteral
 import my.learning.cypher.MapLiteral
+import my.learning.cypher.NullLiteral
 import my.learning.cypher.NodeRecord
 import my.learning.cypher.RelationshipRecord
 import my.learning.cypher.Path
@@ -31,6 +32,7 @@ object CLIPrinter {
           val (k, v) = pairs(0)
           s"{$k:${{prettyPrint(v)}},...}"
       }
+      case NullLiteral() => "null"
       case NodeRecord(_, label, properties) => s"Node(:${label}, ${{prettyPrint(MapLiteral(properties))}})"
       case RelationshipRecord(_, label, properties, _, _) => s"Rel(:${label}, ${{prettyPrint(MapLiteral(properties))}})"
       case Path(relationships) => "Path"

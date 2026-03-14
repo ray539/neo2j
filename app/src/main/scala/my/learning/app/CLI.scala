@@ -2,6 +2,7 @@ import my.learning.cypher.*;
 import scala.io.StdIn.readLine
 import org.scalatest.tools.PrettyPrinter
 import my.learning.app.CLIPrinter
+import scala.io.Source
 
 object ANSI {
   val RESET = "\u001b[0m"
@@ -41,78 +42,93 @@ def CLI(): Unit = {
   println(ANSI.CYAN + "====================================" + ANSI.RESET)
   println("Type a Cypher query and press Enter.")
   println("Type 'exit' or 'quit' to leave.")
+  println("Type 'f <filepath>' to execute a query from a file.")
   println()
 
   while true do
     print(ANSI.GREEN + "neo2j> " + ANSI.RESET)
-    val input = readLine()
-
+    var input = readLine()
     if input == null then
       println(ANSI.YELLOW + "Goodbye." + ANSI.RESET)
       return
-
     input.trim().toLowerCase() match
       case "quit" | "exit" => {
         println(ANSI.YELLOW + "Goodbye." + ANSI.RESET)
         return
       }
       case _ => {}
+    val toks = input.trim().toLowerCase().split("\\s+");
 
-    try
-      val res = app.executeQuery(input)
-      val numRows = res.size
-      println()
-      if numRows == 0 then println(ANSI.YELLOW + "no rows" + ANSI.RESET)
-      else if res(0).size == 0 then
-        println(ANSI.YELLOW + "no columns" + ANSI.RESET)
-      else
-        val cols = res(0).keySet.toList
+    var ok = true
+    if toks.size >= 2 && toks(0) == "f" then
+      val fpath = toks(1)
+      try
+        input = Source.fromFile(fpath).mkString
+      catch
+        case e: Throwable => {
+          println()
+          println(ANSI.RED + "Error:" + ANSI.RESET)
+          println(ANSI.RED + e.getMessage + ANSI.RESET)
+          println()
+          ok = false
+        }
 
-        // default type is null
-        val table = Array.ofDim[String](numRows + 1, cols.size)
+    if ok then
+      try
+        val res = app.executeQuery(input)
+        val numRows = res.size
+        println()
+        if numRows == 0 then println(ANSI.YELLOW + "no rows" + ANSI.RESET)
+        else if res(0).size == 0 then
+          println(ANSI.YELLOW + "no columns" + ANSI.RESET)
+        else
+          val cols = res(0).keySet.toList
 
-        for colIdx <- (0 until cols.size) do table(0)(colIdx) = cols(colIdx)
+          // default type is null
+          val table = Array.ofDim[String](numRows + 1, cols.size)
 
-        for rowIdx <- (1 to numRows) do
+          for colIdx <- (0 until cols.size) do table(0)(colIdx) = cols(colIdx)
+
+          for rowIdx <- (1 to numRows) do
+            for colIdx <- (0 until cols.size) do
+              table(rowIdx)(colIdx) =
+                CLIPrinter.prettyPrint(res(rowIdx - 1)(cols(colIdx)))
+
+          val colSizes = Array.ofDim[Int](cols.size)
+
           for colIdx <- (0 until cols.size) do
-            table(rowIdx)(colIdx) =
-              CLIPrinter.prettyPrint(res(rowIdx - 1)(cols(colIdx)))
+            for rowIdx <- (0 to numRows) do
+              colSizes(colIdx) =
+                Math.max(table(rowIdx)(colIdx).size, colSizes(colIdx))
 
-        val colSizes = Array.ofDim[Int](cols.size)
-
-        for colIdx <- (0 until cols.size) do
           for rowIdx <- (0 to numRows) do
-            colSizes(colIdx) =
-              Math.max(table(rowIdx)(colIdx).size, colSizes(colIdx))
+            for colIdx <- (0 until cols.size) do
+              print("+")
+              print("-" * (colSizes(colIdx) + 2))
+            print("+\n")
 
-        for rowIdx <- (0 to numRows) do
+            for colIdx <- (0 until cols.size) do
+              print("| ")
+              print(centerPad(table(rowIdx)(colIdx), colSizes(colIdx), ' '))
+              print(" ")
+            print("|\n")
+
           for colIdx <- (0 until cols.size) do
             print("+")
             print("-" * (colSizes(colIdx) + 2))
           print("+\n")
 
-          for colIdx <- (0 until cols.size) do
-            print("| ")
-            print(centerPad(table(rowIdx)(colIdx), colSizes(colIdx), ' '))
-            print(" ")
-          print("|\n")
+          println(s"${res.size} rows")
 
-        for colIdx <- (0 until cols.size) do
-          print("+")
-          print("-" * (colSizes(colIdx) + 2))
-        print("+\n")
-
-        println(s"${res.size} rows")
-
-      println()
-
-    catch
-      case e: Throwable => {
-        println()
-        println(ANSI.RED + "Error:" + ANSI.RESET)
-        println(ANSI.RED + e.getMessage + ANSI.RESET)
         println()
 
-      }
+      catch
+        case e: Throwable => {
+          println()
+          println(ANSI.RED + "Error:" + ANSI.RESET)
+          println(ANSI.RED + e.getMessage + ANSI.RESET)
+          println()
+
+        }
 
 }

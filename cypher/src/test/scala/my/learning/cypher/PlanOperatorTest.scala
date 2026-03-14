@@ -78,7 +78,7 @@ class PlanOperatorTest extends AnyFunSuite {
 
     val ktx2 = KernelTransaction(store)
     val planBuilder = PlanBuilder(ktx2)
-    val stmt1 = TestHelper.statementFromString("MATCH (a:A)")
+    val stmt1 = ASTParser.parseAST("MATCH (a:A)")
 
     val plan = planBuilder.getPhysicalPlan(stmt1)
     println(PlanPrinter.print(plan))
@@ -101,7 +101,7 @@ class PlanOperatorTest extends AnyFunSuite {
 
     val ktx2 = KernelTransaction(store)
     val planBuilder = PlanBuilder(ktx2)
-    val stmt1 = TestHelper.statementFromString("MATCH (a0:A {x: 0})") //  - [] -> (a1:A{x:1})")
+    val stmt1 = ASTParser.parseAST("MATCH (a0:A {x: 0})") //  - [] -> (a1:A{x:1})")
 
     val plan = planBuilder.getPhysicalPlan(stmt1)
     println(PlanPrinter.print(plan))
@@ -124,7 +124,7 @@ class PlanOperatorTest extends AnyFunSuite {
 
     val ktx2 = KernelTransaction(store)
     val planBuilder = PlanBuilder(ktx2)
-    val stmt1 = TestHelper.statementFromString("MATCH (a0:A {x: 0}) - [] -> (a1)")
+    val stmt1 = ASTParser.parseAST("MATCH (a0:A {x: 0}) - [] -> (a1)")
     val plan = planBuilder.getPhysicalPlan(stmt1)
     println(PlanPrinter.print(plan))
     for row <- plan do {
@@ -145,7 +145,7 @@ class PlanOperatorTest extends AnyFunSuite {
 
     val ktx2 = KernelTransaction(store)
     val planBuilder = PlanBuilder(ktx2)
-    val stmt1 = TestHelper.statementFromString("MATCH (a0:A {x: 0}) <- [] - (a1)")
+    val stmt1 = ASTParser.parseAST("MATCH (a0:A {x: 0}) <- [] - (a1)")
     val plan = planBuilder.getPhysicalPlan(stmt1)
     println(PlanPrinter.print(plan))
     for row <- plan do {

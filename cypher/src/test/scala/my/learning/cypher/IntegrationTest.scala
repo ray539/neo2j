@@ -85,4 +85,19 @@ class IntegrationTest extends AnyFunSuite {
     print_rows(app.executeQuery("MATCH (n) WHERE n.x >= 2 RETURN n"))
     print_rows(app.executeQuery("MATCH (n {x:1}) WHERE n.x >= 2 RETURN n"))
   }
+
+  test("long relationship") {
+    val app = CypherRuntime()
+    print_rows(app.executeQuery("CREATE (a) <- [:R] - (b) - [:R] -> (c)", showPlan=true))
+  }
+
+  test("long relationship 2") {
+    val app = CypherRuntime()
+    print_rows(app.executeQuery("CREATE (xyz) <- [:WORKS_FOR] - (sally) - [:LIKES] -> (integrations) <- [:LIKES] - (dan)", showPlan=true, showast = true))
+  }
+
+  test("long relationship 3") {
+    val app = CypherRuntime()
+    print_rows(app.executeQuery("CREATE (a) <- [:R1] - (b) - [:R2] -> (c) <- [:R3] - (d)", showPlan=true))
+  }
 }

@@ -8,70 +8,88 @@ import my.learning.cypher.*;
 import my.learning.generated.*;
 import my.learning.generated.Cypher.*;
 
-case object TestHelper {
-  def statementFromString(input: String) = {
-    val _input: CharStream = CharStreams.fromString(input)
-    val lexer: CypherLexer = CypherLexer(_input)
-    val tokens = CommonTokenStream(lexer)
-    val parser = Cypher(tokens)
-    val statementCtx = parser.statement().asInstanceOf[StatementContext]
-    val sb = StatementBuilder()
-    sb.visitStatement(statementCtx)
-  }
-}
+// case object TestHelper {
+//   def statementFromString(input: String) = {
+//     val _input: CharStream = CharStreams.fromString(input)
+//     val lexer: CypherLexer = CypherLexer(_input)
+//     val tokens = CommonTokenStream(lexer)
+
+//     val parser = Cypher(tokens)
+//     parser.setErrorHandler(new BailErrorStrategy())
+
+//     val statementCtx = parser.statement().asInstanceOf[StatementContext]
+//     val sb = StatementBuilder()
+//     sb.visitStatement(statementCtx)
+//   }
+// }
 
 class ExampleTest extends AnyFunSuite {
 
   test("create stmt") {
-    val stmt1 = TestHelper.statementFromString("CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)")
+    val stmt1 = ASTParser.parseAST(
+      "CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)"
+    )
     val printer = ASTPrinter()
     val x = stmt1.accept(printer)
     println(x)
   }
 
   test("temp") {
-    val stmt1 = TestHelper.statementFromString("CREATE (a:A)")
+    val stmt1 = ASTParser.parseAST("CREATE (a:A)")
     val printer = ASTPrinter()
     val x = stmt1.accept(printer)
     println(x)
   }
 
   test("create where") {
-    val where = TestHelper.statementFromString("WHERE a >= 2 AND 1 + 2 = 3")
+    val where = ASTParser.parseAST("WHERE a >= 2 AND 1 + 2 = 3")
     val printer = ASTPrinter()
     val x = where.accept(printer)
     println(x)
   }
 
   test("create properties") {
-    val input = TestHelper.statementFromString("CREATE ({x: 0})")
+    val input = ASTParser.parseAST("CREATE ({x: 0})")
     val printer = ASTPrinter()
     val x = input.accept(printer)
     println(x)
   }
 
   test("return") {
-    val input = TestHelper.statementFromString("RETURN a,b,c")
+    val input = ASTParser.parseAST("RETURN a,b,c")
     val printer = ASTPrinter()
     val x = input.accept(printer)
     println(x)
   }
 
   test("named create") {
-    val input = TestHelper.statementFromString("CREATE(n:A{x:1}) RETURN n")
+    val input = ASTParser.parseAST("CREATE(n:A{x:1}) RETURN n")
     val printer = ASTPrinter()
     val x = input.accept(printer)
     println(x)
   }
 
   test("return expression") {
-    val input = TestHelper.statementFromString("CREATE(n:A{x:1}) RETURN n.x")
+    val input = ASTParser.parseAST("CREATE(n:A{x:1}) RETURN n.x")
     val printer = ASTPrinter()
     val x = input.accept(printer)
     println(x)
   }
 
+  test("invalid") {
+    assertThrows(ASTParser.parseAST("asd"))
+  }
 
+  test("underscore") {
+    val input = ASTParser.parseAST("CREATE (xyz) <- [:WORKS_FOR] - (sally)")
+    val printer = ASTPrinter()
+    val x = input.accept(printer)
+    println(x)
+  }
+
+  test("invalid characters") {
+    assertThrows(ASTParser.parseAST("你好"))
+  }
 
 
 }

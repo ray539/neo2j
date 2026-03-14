@@ -260,9 +260,17 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
 
   override def visitExpression3(ctx: Expression3Context): Expression =
     if ctx.ADD() != null then
-      return UnaryExpression(Add, visitExpression2(ctx.expression2()), ctx.getText())
+      return UnaryExpression(
+        Add,
+        visitExpression2(ctx.expression2()),
+        ctx.getText()
+      )
     if ctx.SUB() != null then
-      return UnaryExpression(Sub, visitExpression2(ctx.expression2()), ctx.getText())
+      return UnaryExpression(
+        Sub,
+        visitExpression2(ctx.expression2()),
+        ctx.getText()
+      )
     return visitExpression2(ctx.expression2())
 
   override def visitExpression2(ctx: Expression2Context): Expression =
@@ -291,7 +299,12 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
     )
 
   override def visitIndex(ctx: IndexContext): BinaryExpression =
-    return BinaryExpression(null, Index, visitExpression(ctx.expression()), ctx.getText())
+    return BinaryExpression(
+      null,
+      Index,
+      visitExpression(ctx.expression()),
+      ctx.getText()
+    )
 
   override def visitExpression1(ctx: Expression1Context): Expression =
     if ctx.literal() != null then return visitLiteral(ctx.literal())
@@ -319,6 +332,7 @@ class StatementBuilder extends CypherBaseVisitor[AnyRef] {
     return null
 }
 
+// doesn't stop parsing, but collects the errors all at once so it can be reported
 class CollectingErrorListener extends BaseErrorListener {
   val errors: mutable.ListBuffer[String] = mutable.ListBuffer()
   override def syntaxError(
@@ -331,7 +345,21 @@ class CollectingErrorListener extends BaseErrorListener {
   ): Unit = {
     errors.addOne(s"line $line:$charPositionInLine $msg")
   }
+}
 
+class ThrowingErrorListener extends BaseErrorListener {
+  override def syntaxError(
+      recognizer: Recognizer[?, ?],
+      offendingSymbol: Object,
+      line: Int,
+      charPositionInLine: Int,
+      msg: String,
+      e: RecognitionException
+  ): Unit = {
+    throw new RuntimeException(
+      s"parse errors: line $line:$charPositionInLine $msg"
+    )
+  }
 }
 
 object ASTParser {
@@ -341,20 +369,16 @@ object ASTParser {
     val tokens: CommonTokenStream = CommonTokenStream(lexer)
     val parser: Cypher = Cypher(tokens)
 
-    val errorListener = CollectingErrorListener()
+    val throwingErrorListener = ThrowingErrorListener()
     lexer.removeErrorListeners()
     parser.removeErrorListeners()
-    lexer.addErrorListener(errorListener)
-    parser.addErrorListener(errorListener)
+
+    lexer.addErrorListener(throwingErrorListener)
+    parser.addErrorListener(throwingErrorListener)
+
+    parser.setErrorHandler(new BailErrorStrategy())
 
     val tree: ParseTree = parser.statement(); // build tree
-
-    if (errorListener.errors.size > 0) then {
-      throw Exception(
-        "Parse errors:\n" + errorListener.errors.mkString("\n")
-      )
-    }
-
     val sb = StatementBuilder()
     sb.visitStatement(tree.asInstanceOf[StatementContext])
   }
@@ -363,6 +387,7 @@ object ASTParser {
 @main
 def main() =
 
+  ASTParser.parseAST("你好")
   val text =
     "RETURN (1+2)*3 + 4" // "CREATE ({x: 0})" // "CREATE (a:A) - [r1] -> (b:A) - [r2] -> (c:A)"
   parseAST(text)

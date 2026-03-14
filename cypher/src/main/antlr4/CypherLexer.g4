@@ -35,7 +35,10 @@ TRUE: 'TRUE';
 FALSE: 'FALSE';
 DOT: '.';
 
-ID: [a-zA-Z][a-zA-Z0-9]*;
+ID: [a-zA-Z_][a-zA-Z0-9_]*;
 INTEGER_LITERAL: [0-9]+;
 STRING_LITERAL: '"' (~["])* '"';
-WS: [ \t]* -> skip;
+
+
+
+WS: [ \t\n\r]+ -> skip;

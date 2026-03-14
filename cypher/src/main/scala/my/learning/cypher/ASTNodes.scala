@@ -232,7 +232,7 @@ sealed trait Operator {
 }
 
 case object And extends Operator {
-  override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
+  override def binOp(lval: LiteralExpression, rval: LiteralExpression): BoolLiteral = {
     (lval, rval) match
       case (BoolLiteral(b1), BoolLiteral(b2)) => BoolLiteral(b1 && b2)
       case _ => throw Exception(s"invalid operands to And: $lval $rval")
@@ -240,7 +240,7 @@ case object And extends Operator {
 }
 
 case object Or extends Operator {
-  override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
+  override def binOp(lval: LiteralExpression, rval: LiteralExpression): BoolLiteral = {
     (lval, rval) match
       case (BoolLiteral(b1), BoolLiteral(b2)) => BoolLiteral(b1 || b2)
       case _ => throw Exception(s"invalid operands to Or: $lval $rval")
@@ -248,43 +248,58 @@ case object Or extends Operator {
 }
 
 case object Eq extends Operator {
-  override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
+  override def binOp(lval: LiteralExpression, rval: LiteralExpression): BoolLiteral = {
+
+    // if anything is the 'null' type, we return false
     (lval, rval) match
+      case (NullLiteral(), _) => BoolLiteral(false)
+      case (_, NullLiteral()) => BoolLiteral(false)
       case (v1, v2) => BoolLiteral(v1.equals(v2))
   }
 }
 
+
+//  (n.x = n.y)
+
 case object Neq extends Operator {
-  override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
-    (lval, rval) match
-      case (v1, v2) => BoolLiteral(!v1.equals(v2))
+  override def binOp(lval: LiteralExpression, rval: LiteralExpression): BoolLiteral = {
+    val tmp = Eq.binOp(lval, rval)
+    BoolLiteral(!tmp.value)
   }
 }
 
 case object Le extends Operator {
-  override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
+  override def binOp(lval: LiteralExpression, rval: LiteralExpression): BoolLiteral = {
     (lval, rval) match
+      case (NullLiteral(), _) => BoolLiteral(false)
+      case (_, NullLiteral()) => BoolLiteral(false)
       case (IntLiteral(x1), IntLiteral(x2)) => BoolLiteral(x1 <= x2)
       case _ => throw Exception(s"invalid operands to Le: $lval $rval")
   }
 }
 case object Ge extends Operator {
-  override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
+  override def binOp(lval: LiteralExpression, rval: LiteralExpression): BoolLiteral = {
     (lval, rval) match
+      case (NullLiteral(), _) => BoolLiteral(false)
+      case (_, NullLiteral()) => BoolLiteral(false)
       case (IntLiteral(x1), IntLiteral(x2)) => BoolLiteral(x1 >= x2)
       case _ => throw Exception(s"invalid operands to Ge: $lval $rval")
   }
 }
 case object Lt extends Operator {
-  override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
+  override def binOp(lval: LiteralExpression, rval: LiteralExpression): BoolLiteral = {
     (lval, rval) match
+      case (NullLiteral(), _) => BoolLiteral(false)
+      case (_, NullLiteral()) => BoolLiteral(false)
       case (IntLiteral(x1), IntLiteral(x2)) => BoolLiteral(x1 < x2)
       case _ => throw Exception(s"invalid operands to Lt: $lval $rval")
   }
 }
 case object Gt extends Operator {
-  override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
+  override def binOp(lval: LiteralExpression, rval: LiteralExpression): BoolLiteral = {
     (lval, rval) match
+      case (NullLiteral(), _) => BoolLiteral(false)
+      case (_, NullLiteral()) => BoolLiteral(false)
       case (IntLiteral(x1), IntLiteral(x2)) => BoolLiteral(x1 > x2)
       case _ => throw Exception(s"invalid operands to Gt: $lval $rval")
   }
@@ -292,6 +307,8 @@ case object Gt extends Operator {
 case object Add extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
+      case (NullLiteral(), _) => NullLiteral()
+      case (_, NullLiteral()) => NullLiteral()
       case (IntLiteral(x1), IntLiteral(x2))       => IntLiteral(x1 + x2)
       case (StringLiteral(s1), StringLiteral(s2)) => StringLiteral(s1 + s2)
       case _ => throw Exception(s"invalid operands to Add: $lval $rval")
@@ -299,6 +316,7 @@ case object Add extends Operator {
 
   override def unOp(operand: LiteralExpression): LiteralExpression = {
     operand match
+      case NullLiteral() => NullLiteral()
       case IntLiteral(x1) => IntLiteral(x1) 
       case _ => throw Exception(s"invalid operands to Add: $operand")
   }
@@ -307,12 +325,15 @@ case object Add extends Operator {
 case object Sub extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
+      case (NullLiteral(), _) => NullLiteral()
+      case (_, NullLiteral()) => NullLiteral()
       case (IntLiteral(x1), IntLiteral(x2)) => IntLiteral(x1 - x2)
       case _ => throw Exception(s"invalid operands to Sub: $lval $rval")
   }
 
   override def unOp(operand: LiteralExpression): LiteralExpression = {
     operand match
+      case NullLiteral() => NullLiteral()
       case IntLiteral(x1) => IntLiteral(-x1) 
       case _ => throw Exception(s"invalid operands to Sub: $operand")
   }
@@ -320,6 +341,8 @@ case object Sub extends Operator {
 case object Mul extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
+      case (NullLiteral(), _) => NullLiteral()
+      case (_, NullLiteral()) => NullLiteral()
       case (IntLiteral(x1), IntLiteral(x2)) => IntLiteral(x1 * x2)
       case _ => throw Exception(s"invalid operands to Mul: $lval $rval")
   }
@@ -327,6 +350,8 @@ case object Mul extends Operator {
 case object Div extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
+      case (NullLiteral(), _) => NullLiteral()
+      case (_, NullLiteral()) => NullLiteral()
       case (IntLiteral(x1), IntLiteral(x2)) => IntLiteral(x1 / x2)
       case _ => throw Exception(s"invalid operands to Div: $lval $rval")
   }
@@ -334,6 +359,8 @@ case object Div extends Operator {
 case object Mod extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
+      case (NullLiteral(), _) => NullLiteral()
+      case (_, NullLiteral()) => NullLiteral()
       case (IntLiteral(x1), IntLiteral(x2)) => IntLiteral(x1 % x2)
       case _ => throw Exception(s"invalid operands to Mod: $lval $rval")
   }
@@ -341,6 +368,8 @@ case object Mod extends Operator {
 case object Pow extends Operator {
   override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
     (lval, rval) match
+      case (NullLiteral(), _) => NullLiteral()
+      case (_, NullLiteral()) => NullLiteral()
       case (IntLiteral(x1), IntLiteral(x2)) =>
         IntLiteral(Math.pow(x1, x2).toInt)
       case _ => throw Exception(s"invalid operands to Pow: $lval $rval")
@@ -348,14 +377,14 @@ case object Pow extends Operator {
 
 }
 case object Not extends Operator {
-  override def unOp(operand: LiteralExpression): LiteralExpression = {
+  override def unOp(operand: LiteralExpression): BoolLiteral = {
     operand match
       case BoolLiteral(b) => BoolLiteral(!b)
       case _ => throw Exception(s"invalid operands to Not: $operand")
   }
 }
 case object IdEq extends Operator {
-  override def binOp(lval: LiteralExpression, rval: LiteralExpression) = {
+  override def binOp(lval: LiteralExpression, rval: LiteralExpression): BoolLiteral = {
     (lval, rval) match
       case (v1: NodeRecord, v2: NodeRecord) => BoolLiteral(v1.id == v2.id)
       case (v1: RelationshipRecord, v2: RelationshipRecord) =>
@@ -370,17 +399,17 @@ case object GetAttr extends Operator {
       case (MapLiteral(map), StringLiteral(key)) =>
         map.getOrElse(
           key,
-          throw new RuntimeException(s"Key '$key' not found in map")
+          NullLiteral()
         )
       case (NodeRecord(_, _, propreties), StringLiteral(key)) =>
         propreties.getOrElse(
           key,
-          throw new RuntimeException(s"Key '$key' not found in map")
+          NullLiteral()
         )
       case (RelationshipRecord(_, _, propreties, _, _), StringLiteral(key)) =>
         propreties.getOrElse(
           key,
-          throw new RuntimeException(s"Key '$key' not found in map")
+          NullLiteral()
         )
       case _ => throw Exception(s"invalid operands to GetAttr: $lval $rval")
   }
@@ -533,6 +562,13 @@ case class ListLiteral(value: List[LiteralExpression])
     this
   }
 }
+
+case class NullLiteral() extends LiteralExpression with Expression("null") {
+
+  override def getLiteralValue(varValues: Map[String, LiteralExpression], ktx: KernelTransaction): LiteralExpression = this
+  override def isTruthy: Boolean = false
+
+};
 
 // models a constructor CALL which takes in an arbritary amount of arguments
 case class ListConstructorCall(values: Seq[Expression]) extends Expression {

@@ -23,12 +23,15 @@ mvn  exec:java -Dexec.mainClass="CLI" -pl app
 - `Integer`, `String`, `Boolean` types + the common arithmetic functions
 - `Node`, `Relationship`, `Path` return types
 
+See (https://neo4j.com/docs/cypher-manual/5).
+
 ### Examples
 #### simple example
 ![alt text](images/demo1.png)
 #### string concatenation
 ![alt text](images/demo2.png)
-
+#### load from file / where clause
+![alt text](images/demo3.png)
 
 ### TODO
 - semantic analysis checks
